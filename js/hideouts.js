@@ -8,9 +8,10 @@
 // 0.42 x 0.4 x 0.86 parked in the middle; every other door drops or slides in the plane of the mouth.
 //
 // Cost per hideout: the props are baked into ONE mesh with vertex colours, the overhead surfaces into one mesh per
-// roof colour (ctx.cutMat), plus the door, a bulb, a light pool, a signboard and (only while searched) the torchlight.
-// That is 6 to 8 draw calls and about 1100 triangles. Textures, door materials and template geometries are made once
-// and shared by all hideouts; they live as long as the page does.
+// roof colour (ctx.cutMat), plus the door and its depth mask (two of each for the two-leaf doors), a bulb, a signboard,
+// a light pool (only while the bulb is lit) and the torchlight (only while searched). That is 7 to 9 draw calls with
+// the door shut, at most 11 while searched, and about 800 to 1500 triangles. Textures, door materials and template
+// geometries are made once and shared by all hideouts; they live as long as the page does.
 //
 // Light without lights: the bulb's glow on the props is baked per vertex and read through a two-texel light map, so
 // an open hideout looks lit and a closed one goes dark without any THREE.Light. The props are MeshLambertMaterial,
@@ -421,11 +422,20 @@ function torchGeos() {
 }
 
 let SH = null;
+const MASKS = new Map();   // door material -> its depth mask
 function shared() {
   if (SH) return SH;
   // forceSinglePass: a door is one flat sheet, so it needs no separate back and front pass. Without it three.js draws
   // every transparent double-sided mesh twice and looks its shader program up again each time, every frame.
-  const doorMat = map => new THREE.MeshLambertMaterial({ map, vertexColors: true, transparent: true, depthWrite: false, side: THREE.DoubleSide, forceSinglePass: true });
+  // Each door material carries a "mask": an invisible twin (no colour, depth only, cut out by the same texture) that is
+  // drawn with the solid things. The door itself is blended and writes no depth, so without the mask anything
+  // see-through that three.js happens to draw later (street-lamp cones, headlight beams, rain) would be painted
+  // straight over a shut door from inside. With it, such light only shows where the door really has a gap.
+  const doorMat = map => {
+    const m = new THREE.MeshLambertMaterial({ map, vertexColors: true, transparent: true, depthWrite: false, side: THREE.DoubleSide, forceSinglePass: true });
+    MASKS.set(m, new THREE.MeshBasicMaterial({ map, alphaTest: 0.5, colorWrite: false, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 2 }));
+    return m;
+  };
   const tex = {
     shutter: canvasTex(128, 128, paintShutter, true, 2), planks: canvasTex(128, 128, paintPlanks, false, 2),
     tin: canvasTex(128, 128, paintTin, true, 2), tarp: canvasTex(128, 128, paintTarp, true, 2),
@@ -491,13 +501,20 @@ function quadGeo(tint) {
   return g;
 }
 
+// a door mesh plus its depth mask, which rides along as a child so it follows every move and rattle
+function doorMesh(geo, mat) {
+  const mesh = new THREE.Mesh(geo, mat), mask = MASKS.get(mat);
+  if (mask) mesh.add(new THREE.Mesh(geo, mask));
+  return mesh;
+}
+
 // a panel that comes down from a fixed top edge while its texture unrolls with it (shutter, tarpaulin, net, branches)
 function dropDoor(parent, mat, wid, hgt, top, z, uRep, tint, cloth) {
   const geo = quadGeo(tint), pos = geo.attributes.position, uv = geo.attributes.uv;
   pos.setXYZ(0, -wid / 2, 0, 0); pos.setXYZ(1, wid / 2, 0, 0); pos.setXYZ(2, -wid / 2, 0, 0); pos.setXYZ(3, wid / 2, 0, 0);
   geo.setIndex([0, 2, 1, 2, 3, 1]);
   geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, -hgt / 2, 0), Math.hypot(wid, hgt) / 2 + 0.06);
-  const mesh = new THREE.Mesh(geo, mat); mesh.position.set(0, top, z); mesh.visible = false; parent.add(mesh);
+  const mesh = doorMesh(geo, mat); mesh.position.set(0, top, z); mesh.visible = false; parent.add(mesh);
   let e = 0;
   return {
     top, h: hgt, z, span: wid / 2 - 0.16, live: !!cloth, solid: 1,
@@ -525,7 +542,7 @@ function slideDoor(parent, mat, leaves, hgt, y0, z, uRep, tint) {
     pos.setXYZ(0, 0, 0, 0); pos.setXYZ(1, 0, 0, 0); pos.setXYZ(2, 0, hgt, 0); pos.setXYZ(3, 0, hgt, 0);
     geo.setIndex(lf.dir > 0 ? [0, 1, 2, 2, 1, 3] : [1, 0, 3, 3, 0, 2]);
     geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(lf.dir * lf.len / 2, hgt / 2, 0), Math.hypot(lf.len, hgt) / 2 + 0.06);
-    const mesh = new THREE.Mesh(geo, mat); mesh.position.set(lf.x0, y0, z); mesh.visible = false; parent.add(mesh);
+    const mesh = doorMesh(geo, mat); mesh.position.set(lf.x0, y0, z); mesh.visible = false; parent.add(mesh);
     return { geo, mesh, lf };
   });
   let span = 0; for (const lf of leaves) span += lf.len;
@@ -552,7 +569,7 @@ function slideDoor(parent, mat, leaves, hgt, y0, z, uRep, tint) {
 
 // two barred leaves on side hinges that swing shut from against the side walls (bungalow gate)
 function gateDoor(parent, S, leafW, hgt, y0, z, hingeX) {
-  const L = new THREE.Mesh(S.leafGeo, S.door.gate), R = new THREE.Mesh(S.leafGeo, S.door.gate);
+  const L = doorMesh(S.leafGeo, S.door.gate), R = doorMesh(S.leafGeo, S.door.gate);
   L.scale.set(leafW, hgt, 1); L.position.set(-hingeX, y0, z);
   R.scale.set(leafW, hgt, 1); R.position.set(hingeX, y0, z);
   parent.add(L, R);
@@ -568,7 +585,7 @@ function gateDoor(parent, S, leafW, hgt, y0, z, hingeX) {
 // an iron grille that drops straight down in its guide channels, like a sluice gate (culvert).
 // Raised, it stands above the lid; it never swings through the space where the car is parked.
 function hangDoor(parent, S, wid, hgt, top, z) {
-  const mesh = new THREE.Mesh(S.hangGeo, S.door.grille);
+  const mesh = doorMesh(S.hangGeo, S.door.grille);
   mesh.scale.set(wid, hgt, 1); mesh.position.set(0, top + hgt, z); parent.add(mesh);
   let y = top + hgt, shut = 0;
   return {

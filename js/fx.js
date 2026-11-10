@@ -25,11 +25,11 @@ const RAIN_BOX = 26, RAIN_HEIGHT = 9, SPLASH_AREA = 20;
 const GRAVITY = 6;                             // for sparks, units / s^2 (exaggerated so the arcs read at chase-camera distance)
 const REBASE = 2048;                           // the internal clock wraps here so shader floats stay precise for hours
 // Draw order among the see-through things in the scene (three.js sorts transparent objects by renderOrder first).
-// The two layers that lie flat on the road go early: after the cars' own ground shadow and light pools (-3, -2) but
-// before anything that stands on the ground and does not write depth, above all the hideout doors (0), so that from
-// inside a hideout the marks and splashes outside are covered by the door planks instead of being painted over them.
-// The layers in the air go late, over lamp cones (3) and under labels (20).
-const ORDER_SKID = -1.6, ORDER_SPLASH = -1.5, ORDER_SMOKE = 6, ORDER_SPARKS = 7, ORDER_RAIN = 8;
+// Tyre marks, splashes and rain go early: after the cars' own ground shadow and light pools (-3, -2) but before the
+// things that stand on the ground without writing depth, above all the hideout doors (0). Seen from inside a hideout
+// the weather outside is then covered by the door planks and shows only through the gaps, instead of being painted
+// over the door. Smoke and sparks go late, over car glass (0) and lamp cones (3) and under the labels (20).
+const ORDER_SKID = -1.6, ORDER_SPLASH = -1.5, ORDER_RAIN = -1.2, ORDER_SMOKE = 6, ORDER_SPARKS = 7;
 
 // ---------------------------------------------------------------------------------------------------------- shaders
 // alpha-style fog for things that should thin out with distance rather than turn fog-coloured
