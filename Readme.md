@@ -31,7 +31,8 @@ using a room code.
 | Drive | `W` `A` `S` `D` or arrow keys | hold the left thumb down to drive, slide to steer, pull back to brake |
 | Handbrake (drift) | `Space` | **DRIFT** |
 | Nitro | `Shift` | **NITRO** |
-| Action (hide, leave, search) | `E` | **HIDE** / **SEARCH** |
+| Action (hide, search) | `E` | **HIDE** / **SEARCH** |
+| Leave a hideout | `E` slips out quietly, `W` bursts out | the two buttons on screen |
 | Headlights | `L` | **Lights** |
 | Horn | `H` | |
 | Big map | `M` | tap the radar |

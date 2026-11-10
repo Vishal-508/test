@@ -17,7 +17,7 @@ const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 const r2 = v => Math.round(v * 100) / 100;
 const money = n => '₹' + Math.round(n).toLocaleString('en-IN');
 const TAU = Math.PI * 2;
-const wrap = a => { while (a > Math.PI) a -= TAU; while (a < -Math.PI) a += TAU; return a; };
+const wrap = a => (Number.isFinite(a) ? a - TAU * Math.floor((a + Math.PI) / TAU) : 0);   // into -PI..PI without looping, whatever comes in
 const lerpAngle = (a, b, t) => a + wrap(b - a) * t;
 const smooth = t => t * t * (3 - 2 * t);
 const mmss = s => { s = Math.max(0, Math.ceil(s)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
@@ -33,7 +33,7 @@ const save = (() => {
 const storeSave = () => { try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch (e) { /* private mode: play without saving */ } };
 
 // ------------------------------------------------------------------ renderer, lights, effects
-const isTouch = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
+const isTouch = matchMedia('(pointer: coarse)').matches || ('ontouchstart' in window && !matchMedia('(any-pointer: fine)').matches);
 if (isTouch) document.body.classList.add('touch');
 const canvas = $('c');
 let renderer;
@@ -221,6 +221,7 @@ function doAction(P, type, i) {
       const h = hideOf(i); if (!h || P.hidden >= 0 || P.hiding >= 0 || dist(v, h.front) > HIDE.RANGE + slack || Math.abs(v.vf) > HIDE.SPEED + 0.8) return;
       if ([...S.players.values()].some(o => o !== P && (o.hidden === i || o.hiding === i))) return;
       P.hiding = i; P.hideAt = S.t + (h.grove ? HIDE.IN_GROVE : HIDE.IN); P.seenIn = false; P.bankT = 0;
+      for (const c of S.cops) if (c.sawIn && c.sawIn.id === P.id) c.sawIn = null;   // earlier sightings are forgotten; a jeep watching this entry notes it again
     } else if (type === 'unhide') { // i: 0 slip out quietly, 1 burst out
       if (P.hidden < 0) return;
       const h = hideOf(P.hidden);
@@ -343,14 +344,14 @@ function copTick(c, dt) {
   } else if (c.st === 'respond') {
     if (!c.path) { copGo(c, c.goal.x, c.goal.y); c.respT = 0; }
     c.respT = (c.respT || 0) + dt;
-    if (copDrive(c, CFG.COP_RESPOND * sp, dt) || c.respT > 40) startSweep(c, c.goal, false, 0);
+    if (copDrive(c, CFG.COP_RESPOND * sp, dt) || c.respT > 80) startSweep(c, c.goal, false, 0);
   } else if (c.st === 'search') {
     if (c.pre) { if (!c.path) copGo(c, c.pre.x, c.pre.y); if (copDrive(c, CFG.COP_RESPOND * sp, dt)) { c.pre = null; c.path = null; } return; }
     if (!c.sweep.length) { c.st = 'patrol'; c.path = null; c.wait = 0.5; copStop(c, dt); return; }
     const h = W.hides[c.sweep[0]];
     c.sweepT = (c.sweepT || 0) + dt;
-    if (!h || (c.sweepT > 18 && c.searchT === 0)) { c.sweep.shift(); c.path = null; c.sweepT = 0; return; }   // no such door, or it cannot be reached: move on
-    if (!c.path) copGo(c, h.search.x, h.search.y);
+    if (!h || (c.sweepT > 18 + (c.sweepLen || 0) && c.searchT === 0)) { c.sweep.shift(); c.path = null; c.sweepT = 0; return; }   // no such door, or it cannot be reached: move on
+    if (!c.path) { copGo(c, h.search.x, h.search.y); c.sweepLen = c.path ? c.path.reduce((t, q, k) => k ? t + dist(q, c.path[k - 1]) : 0, 0) : 0; }
     const there = copDrive(c, CFG.COP_RESPOND * 0.8 * sp, dt) || dist(v, h.search) < 1.0;
     if (there && Math.abs(v.vf) < 0.6) { // parked outside: the officer walks up, shines a torch through the gaps, puts a hand on the bonnet
       const was = c.searchT; c.searchT += dt; S.searchLv[h.i] = clamp(c.searchT / HIDE.SEARCH, 0.05, 1);
@@ -469,7 +470,7 @@ function hostTick(dt) {
     else if (free && !W.inPark(v.x, v.y) && !chased) {
       const every = Math.max(5, (ch.carry.some(isJackpot) ? CFG.TIP_EVERY_JACKPOT : CFG.TIP_EVERY) * (S.cfg.tipMul || 1) - ch.heat * 1.2);
       if (S.t - ch.tipAt >= every) { ch.tipAt = S.t; dispatch(v, 1 + Math.floor(ch.heat / 2), true); ev({ t: 'tip', m: 'Tip-off: a loaded getaway car was seen near ' + nearName(v) + '.', x: v.x, y: v.y, who: ch.id }); }
-    }
+    } else ch.tipAt += dt;   // nobody can call in a car that is behind a door, in the park or already being chased
     // the bust meter: a police vehicle staying close to a slow car fills it
     if (!loose(ch) || ch.immune > 0) { ch.bust = 0; continue; }
     const p = spot(ch), spd = ch.hiding >= 0 ? 1.0 : sp;
@@ -619,10 +620,13 @@ function startScript(me, type, h, mode) {
   if (type === 'in') me.scr = { type, h, t: 0, T: Math.max(0.5, (S.isHost ? me.hideAt - S.t : (h.grove ? HIDE.IN_GROVE : HIDE.IN) - 0.1)), x0: v.x, y0: v.y, a0: v.a, x1: h.mouth.x + ox * 0.9, y1: h.mouth.y + oy * 0.9 };
   else {
     // roll out to the middle of the lane and turn along it: the way you are steering, else away from the nearest police
-    let side = Math.sign(inp.steer) || 0;
+    const kk = In.keys;
+    let side = (kk.has('KeyD') || kk.has('ArrowRight') ? 1 : 0) - (kk.has('KeyA') || kk.has('ArrowLeft') ? 1 : 0);
     if (!side) { let best = null, bd = 30; for (const c of S.cops) { const d = Math.hypot(c.rx - h.front.x, c.ry - h.front.y); if (d < bd) { bd = d; best = { x: c.rx, y: c.ry }; } } for (const P of S.players.values()) if (P.role === 'police') { const d = dist(P.v, h.front); if (d < bd) { bd = d; best = P.v; } }
       const lx = oy, ly = -ox; side = best ? (((best.x - h.front.x) * lx + (best.y - h.front.y) * ly) > 0 ? -1 : 1) : 1; side = -side; }
     // side > 0 means a right turn as seen from the driver's seat leaving the door
+    const run = sd => { for (let d = 0.5; d <= 2.5; d += 0.5) if (!W.walkable(h.front.x - oy * sd * d, h.front.y + ox * sd * d)) return false; return true; };
+    if (!run(side) && run(-side)) side = -side;   // the lane is shut that way
     const rx = -oy * side, ry = ox * side;
     me.scr = { type, h, t: 0, T: HIDE.OUT, x0: h.x, y0: h.y, cx: h.front.x, cy: h.front.y, x1: h.front.x + rx * 0.9, y1: h.front.y + ry * 0.9, a1: Math.atan2(rx, ry), speed: mode ? HIDE.BURST : HIDE.SLIP };
   }
@@ -658,7 +662,7 @@ function readInput(me, dt, assist) {
   th = clamp(th, -1, 1);
   // reverse only engages on a fresh press of the brake at a standstill, so braking to a stop never rolls you backwards out of a job
   if (th < 0) {
-    if (!In.brakeHeld) { In.brakeHeld = true; In.revOk = Math.abs(v.vf) < 0.3; In.restT = 0; }
+    if (!In.brakeHeld) { In.brakeHeld = true; In.revOk = v.vf < 0.3; In.restT = 0; }
     if (Math.abs(v.vf) < 0.1) In.restT += dt;
     if (!In.revOk && In.restT < 0.4 && v.vf <= 0.08) th = 0;
   } else In.brakeHeld = false;
@@ -718,9 +722,13 @@ function localFrame(dt) {
   me.wasHidden = me.hidden >= 0 && me.hidden < 900 ? me.hidden : -1;
   if (me.jailed) me.scr = null;
   // leaving a hideout from the keyboard: E slips out, holding W bursts out
-  if (me.hidden >= 0 && !me.scr) {
+  const fwd = k.has('KeyW') || k.has('ArrowUp');
+  if (me.scr && actHeld) S.latch = true;                 // a key still down from the way in does not count
+  if (me.hidden < 0 || me.scr) S.burstArm = false;
+  else {
+    if (!fwd) S.burstArm = true;
     if (actHeld && !S.latch) { leaveHide(0); S.latch = true; }
-    S.burstT = (k.has('KeyW') || k.has('ArrowUp')) ? (S.burstT || 0) + dt : 0;
+    S.burstT = fwd && S.burstArm ? (S.burstT || 0) + dt : 0;
     if (S.burstT > 0.25) { leaveHide(1); S.burstT = 0; }
   }
   if (k.has('KeyR') && loose(me) && !me.scr) { S.resetT += dt; if (S.resetT > 1) resetCar(me); } else S.resetT = 0;
@@ -1216,6 +1224,7 @@ function bindUi() {
   $('btnMusic').onclick = togMusic; $('btnMusic2').onclick = togMusic;
   $('btnLights').onclick = () => toggleLights();
   $('btnSlip').onclick = () => leaveHide(0); $('btnBurst').onclick = () => leaveHide(1);
+  if (!isTouch) { $('btnSlip').textContent = 'Slip out quietly · E'; $('btnBurst').textContent = 'Burst out · W'; }
   $('btnAgain').onclick = () => { if (S.solo) startSolo(); else if (S.isHost) { clearDyn(); setScreen('lobby'); broadcastLobby(); } };
   $('btnEndMenu').onclick = () => toMenu('');
   $('mini').onclick = () => $('mini').classList.toggle('big');
@@ -1262,7 +1271,7 @@ function bindUi() {
   // phones drop the graphics context when the tab goes to the background; let it come back instead of leaving a black screen
   canvas.addEventListener('webglcontextlost', e => { e.preventDefault(); toast('Graphics paused…'); });
   canvas.addEventListener('webglcontextrestored', () => { toast('Graphics are back.'); resize(); });
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) { initAudio(); try { if (S.screen === 'play' && navigator.wakeLock && navigator.wakeLock.request) navigator.wakeLock.request('screen').catch(() => {}); } catch (e) {} } });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) { if (S.solo && S.screen === 'play' && !S.over) togglePause(true); return; } if (!document.hidden) { initAudio(); try { if (S.screen === 'play' && navigator.wakeLock && navigator.wakeLock.request) navigator.wakeLock.request('screen').catch(() => {}); } catch (e) {} } });
   window.addEventListener('resize', resize);
 }
 function toggleLights() { const me = S.me; if (!me || S.screen !== 'play') return; me.lights = !me.lights; sfx.click(); }

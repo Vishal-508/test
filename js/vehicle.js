@@ -10,7 +10,7 @@ export const CAR = {
 };
 export const NITRO = { TOP: 1.35, ACC: 1.8 };
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-const wrap = a => { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a; };
+const wrap = a => (Number.isFinite(a) ? a - 2 * Math.PI * Math.floor((a + Math.PI) / (2 * Math.PI)) : 0);
 
 export function makeVehicle(kind, x, y, a) {
   return { kind, P: CAR[kind], x, y, a: a || 0, vx: 0, vy: 0, vf: 0, steer: 0, slip: 0, hit: 0, crash: false, stall: 0, gr: 1, charge: 0, boost: 0, bump: null, touch: false };
@@ -177,7 +177,7 @@ export function drive(v, path, d, want, dt) {
   if (Math.abs(ang) > 1.9) target = Math.min(target, 0.8);                  // facing the wrong way: swing round slowly
   out.throttle = clamp((target - v.vf) * 2.2, -1, 1);
   if (v.vf > target + 0.9) out.throttle = -1;
-  // stuck against something: reverse with opposite lock for a moment
-  if (want > 0.4 && sp < 0.22) { d.stuck += dt; if (d.stuck > 0.8) { d.rev = 0.75; d.revSteer = ang >= 0 ? 1 : -1; } } else d.stuck = Math.max(0, d.stuck - dt * 2);
+  // stuck against something, or sliding along a wall while facing the wrong way: reverse with opposite lock for a moment
+  if (want > 0.4 && (sp < 0.22 || (Math.abs(ang) > 1.9 && v.touch))) { d.stuck += dt; if (d.stuck > 0.8) { d.rev = 0.75; d.revSteer = ang >= 0 ? 1 : -1; } } else d.stuck = Math.max(0, d.stuck - dt * 2);
   return out;
 }

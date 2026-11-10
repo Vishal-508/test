@@ -21,8 +21,14 @@
 <script type="module">
 // Preview for js/hideouts.js: all nine kinds side by side, each in a bay between three grey walls with a stand-in car.
 // Without options it loops: open, door comes down, police search (rattle and torchlight), door opens again.
-// Lighting, tone mapping, fog and the two cameras (chase, hide) copy what js/game.js does at the time of writing.
-// URL options: view=all|trio0|trio1|trio2|chase|hide|close|front|side|top|inside  k=<kind index 0..8>
+// Lighting, tone mapping, fog and the game cameras (chase, chasein, lane, hide) copy what js/game.js does at the time of writing.
+// URL options: view=all|trio0|trio1|trio2|chase|chasein|lane|hide|close|front|side|top|inside  k=<kind index 0..8>
+//              real=1 uses the game's own building material for ctx.cutMat (dynamic import of ../js/scene.js), with its
+//                     see-through circle around the selected kind's car (cut=0 turns the circle off)
+//              post=1 renders through the game's bloom and grade (dynamic import of ../js/postfx.js)
+//              pan=<-0.7..0.7> turns the hide camera sideways, as dragging does in the game
+//              town=1 shows the game's real town instead of the row (dynamic import of ../js/world.js and ../js/scene.js,
+//                     which build it from ../data/map.json); k=<0..27> then picks one of its hideouts
 //              f=<0..1> fixes how far the doors are closed   s=<0..1> fixes the search level
 //              roof=0 hides the overhead (cutMat) surfaces, as the cut-away circle does in the game
 //              wallh=<height of the stand-in walls>  bright=1  car=0  labels=1  seed=<n>  jeep=1  ix=<sideways camera shift, inside view>
@@ -32,6 +38,18 @@ import { HIDEOUT_KINDS, kindFor, buildHideout } from '../js/hideouts.js';
 
 const Q = new URLSearchParams(location.search);
 const num = (k, d) => (Q.has(k) && Q.get(k) !== '' && !isNaN(+Q.get(k)) ? +Q.get(k) : d);
+// optional: the game's real material and post-processing (the page works without them)
+const U = { uCut: { value: new THREE.Vector3(0.5, 0.5, -1) }, uRes: { value: new THREE.Vector2(1, 1) } };
+let makeBuildingMaterial = null, makePost = null;
+if (num('real', 0)) { try { ({ makeBuildingMaterial } = await import('../js/scene.js')); } catch (err) { console.warn('real=1: could not load ../js/scene.js, using the stand-in roof material', err); } }
+if (num('post', 0)) { try { ({ makePost } = await import('../js/postfx.js')); } catch (err) { console.warn('post=1: could not load ../js/postfx.js', err); } }
+let town = null;
+if (num('town', 0)) {
+  try {
+    const [wm, sm, map] = await Promise.all([import('../js/world.js'), import('../js/scene.js'), fetch('../data/map.json').then(r => r.json())]);
+    town = { world: wm.buildWorld(map), sm, map };
+  } catch (err) { console.warn('town=1: could not build the real town, showing the row instead', err); }
+}
 const W = num('w', 1.5), D = num('d', 2.0), GAP = W + 1.5, WALL_H = num('wallh', 1.2), SEED = num('seed', 3);
 
 const canvas = document.getElementById('c');
@@ -39,8 +57,8 @@ const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(1);
 if (num('tone', 1)) { renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.5; }   // as js/postfx.js sets it
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x070b16);
-scene.fog = new THREE.Fog(0x070b16, 16, 52);
+scene.background = new THREE.Color(0x0a0f1c);
+scene.fog = new THREE.Fog(0x0a0f1c, 16, 52);
 const camera = new THREE.PerspectiveCamera(52, 1, 0.03, 180);
 // the game's night lighting: a dim hemisphere light and a dim moon
 const bright = num('bright', 0) ? 2.2 : 1;
@@ -53,16 +71,21 @@ const bas = c => new THREE.MeshBasicMaterial({ color: c });
 const box = (w, h, d, mat, x, y, z, parent) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat); m.position.set(x, y, z); (parent || scene).add(m); return m; };
 
 // dark floor, a lane in front of the mouths, lit shop fronts and street lamps across the lane
-const floor = new THREE.Mesh(new THREE.PlaneGeometry(60, 30), lam(0x23262d)); floor.rotation.x = -Math.PI / 2; scene.add(floor);
-const lane = new THREE.Mesh(new THREE.PlaneGeometry(60, 2.2), bas(0x1b2030)); lane.rotation.x = -Math.PI / 2; lane.position.set(0, 0.004, D / 2 + 1.1); scene.add(lane);
 const across = new THREE.Group(); scene.add(across);   // only shown for the inside view, so it never blocks the other cameras
-box(60, 1.4, 0.4, lam(0x6a7088), 0, 0.7, D / 2 + 2.5, across);
-for (let x = -14; x <= 14; x += 1.0) box(0.5, 0.34, 0.02, bas((Math.round(x) % 3) ? 0xffc27a : 0xbfd6ff), x, 0.62, D / 2 + 2.29, across);
-for (let x = -13.5; x <= 14; x += 3.0) { box(0.05, 1.7, 0.05, lam(0x3a3e48), x + 1.45, 0.85, D / 2 + 2.1); const b = new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 8), bas(0xffe2a0)); b.position.set(x + 1.45, 1.72, D / 2 + 2.0); scene.add(b); }
+if (!town) {
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(60, 30), lam(0x23262d)); floor.rotation.x = -Math.PI / 2; scene.add(floor);
+  const lane = new THREE.Mesh(new THREE.PlaneGeometry(60, 2.2), bas(0x1b2030)); lane.rotation.x = -Math.PI / 2; lane.position.set(0, 0.004, D / 2 + 1.1); scene.add(lane);
+  box(60, 1.4, 0.4, lam(0x6a7088), 0, 0.7, D / 2 + 2.5, across);
+  for (let x = -14; x <= 14; x += 1.0) box(0.5, 0.34, 0.02, bas((Math.round(x) % 3) ? 0xffc27a : 0xbfd6ff), x, 0.62, D / 2 + 2.29, across);
+  for (let x = -13.5; x <= 14; x += 3.0) { box(0.05, 1.7, 0.05, lam(0x3a3e48), x + 1.45, 0.85, D / 2 + 2.1); const b = new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 8), bas(0xffe2a0)); b.position.set(x + 1.45, 1.72, D / 2 + 2.0); scene.add(b); }
+}
 
-const wallMat = lam(0x7a7f8c), carMat = lam(0x8a8f98), roofMats = [];
+const carMat = lam(0x8a8f98), roofMats = [];
+let wallMat = lam(0x7a7f8c);
+if (makeBuildingMaterial) { wallMat = makeBuildingMaterial(U, true); wallMat.color.setHex(0x7a7f8c); }   // real=1: the neighbours are the game's buildings, lit windows, cut-away circle and all
 const ctx = {
   cutMat(hex) { // a plain lit material, with the game's darker, bluer top faces but without its see-through circle
+    if (makeBuildingMaterial) { const m = makeBuildingMaterial(U, false); m.color.setHex(hex); m.visible = num('roof', 1) !== 0; roofMats.push(m); return m; }   // exactly what js/scene.js passes
     const m = new THREE.MeshLambertMaterial({ color: hex }); m.visible = num('roof', 1) !== 0; roofMats.push(m);
     m.onBeforeCompile = sh => {
       sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vONormal;').replace('#include <project_vertex>', '#include <project_vertex>\nvONormal = normal;');
@@ -82,7 +105,16 @@ const ctx = {
 };
 
 const list = [];
-HIDEOUT_KINDS.forEach((kind, i) => {
+if (town) { // the real town: js/scene.js builds every hideout itself (through its own import of js/hideouts.js)
+  try {
+    const H = town.sm.buildScene(scene, town.map, town.world, U, { ground: 1024, aniso: 4, wet: false, cones: true });
+    town.world.hides.forEach((h, i) => {
+      const car = box(0.42, 0.36, 0.86, carMat, h.x, 0.18, h.y); car.rotation.y = h.a; car.visible = num('car', 1) !== 0;
+      list.push({ kind: h.hkind, x: h.x, z: h.y, a: h.a, d: h.bay.d, h: H.hideVis[i].ho, car });
+    });
+  } catch (err) { console.warn('town=1: js/scene.js could not build the town', err); town = null; }
+}
+if (!list.length) HIDEOUT_KINDS.forEach((kind, i) => {
   const x = (i - (HIDEOUT_KINDS.length - 1) / 2) * GAP;
   const h = buildHideout({ kind, w: W, d: D, seed: SEED + i * 7, label: !!num('labels', 0) }, ctx);   // seeds step by 7, as in the game
   h.g.position.set(x, 0, 0); scene.add(h.g);
@@ -97,23 +129,37 @@ HIDEOUT_KINDS.forEach((kind, i) => {
 
 // camera presets
 const state = { view: Q.get('view') || 'all', k: num('k', 0), f: Q.has('f') ? num('f', 0) : null, s: Q.has('s') ? num('s', 0) : null, auto: true, time: 0 };
+const _cv = new THREE.Vector3();
 function placeCamera() {
-  const it = list[Math.max(0, Math.min(list.length - 1, state.k | 0))], x = it.x, v = state.view;
-  const indoors = v === 'inside' || v === 'hide';
-  camera.near = indoors ? 0.02 : 0.3; camera.fov = v === 'inside' ? 70 : 52; across.visible = indoors;
-  headlamp.position.set(x, 0.7, D / 2 + 0.75); headlamp.target.position.set(x, 0, D / 2 - 5.05);   // a car nosing in at the mouth
-  if (v === 'all') { camera.position.set(0, 11.5, 21); camera.lookAt(0, 0.2, 0.4); }
+  const it = list[Math.max(0, Math.min(list.length - 1, state.k | 0))], v = state.view;
+  const indoors = v === 'inside' || v === 'hide', grove = it.kind === 'grove', hd = (it.d || D) / 2;
+  // everything below is written in the hideout's own space (mouth on +Z) and turned into the world by P()
+  const ca = Math.cos(it.a || 0), sa = Math.sin(it.a || 0);
+  const P = (out, lx, y, lz) => out.set(it.x + lx * ca + lz * sa, y, (it.z || 0) - lx * sa + lz * ca);
+  const look = (px, py, pz, tx, ty, tz) => { P(camera.position, px, py, pz); camera.lookAt(P(_cv, tx, ty, tz)); };
+  camera.near = indoors ? 0.06 : v.startsWith('chase') || v === 'lane' ? 1.6 : 0.3; camera.fov = v === 'inside' ? 70 : 52; across.visible = indoors;
+  P(headlamp.position, 0, 0.7, hd + 0.75); P(headlamp.target.position, 0, 0, hd - 5.05);            // a car nosing in at the mouth
+  const CD = 7.6, CP = 0.7;                                                                        // js/game.js: cam.dist and cam.pitch
+  if (town && (v === 'all' || v.startsWith('trio'))) look(0, 9, 8, 0, 0.2, 0.4);
+  else if (v === 'all') { camera.position.set(0, 11.5, 21); camera.lookAt(0, 0.2, 0.4); }
   else if (v.startsWith('trio')) { const cx = (+v.slice(4) - 1) * GAP * 3; camera.position.set(cx, 4.6, 7.4); camera.lookAt(cx, 0.35, 0.2); }
-  else if (v === 'chase') { camera.position.set(x, 8.6 * Math.sin(0.84), 0.7 + 8.6 * Math.cos(0.84)); camera.lookAt(x, 0.3, 0.7); }   // the game's chase camera, from the lane side
-  else if (v === 'hide') { camera.position.set(x, 0.46, -0.82); camera.lookAt(x, 0.3, 3); }                                        // the game's camera while hidden inside
-  else if (v === 'front') { camera.position.set(x + 0.4, 0.75, 3.0); camera.lookAt(x, 0.42, 0.6); }
-  else if (v === 'close') { camera.position.set(x + 0.9, 1.9, 3.3); camera.lookAt(x, 0.38, 0.3); }
-  else if (v === 'top') { camera.position.set(x, 5.2, 1.6); camera.lookAt(x, 0.2, -0.1); }
-  else if (v === 'side') { camera.position.set(x + 2.6, 2.4, 3.2); camera.lookAt(x, 0.35, 0.3); }
-  else if (v === 'inside') { camera.position.set(x + num('ix', 0), 0.3, -D / 2 + 0.07); camera.lookAt(x, 0.3, D / 2); }
-  camera.updateProjectionMatrix();
+  else if (v === 'chase') look(0, CD * Math.sin(CP), hd + 0.2 + CD * Math.cos(CP), 0, 0.3, hd + 0.2);             // the chase camera of a car nosing up to the door from the lane
+  else if (v === 'chasein') look(0, CD * Math.sin(CP), 0.7 - CD * Math.cos(CP), 0, 0.3, 0.7);                     // the chase camera of the car parked inside, facing out: it looks over the back wall
+  else if (v === 'lane') look(-1.6 - CD * Math.cos(CP), CD * Math.sin(CP), hd + 1.1, -0.9, 0.3, hd + 1.1);       // the chase camera of a jeep driving past along the lane
+  else if (v === 'hide') { const pan = Math.max(-0.7, Math.min(0.7, num('pan', 0))); look(0, grove ? 0.62 : 0.47, grove ? -0.7 : -0.8, pan * 3, 0.3, 3); }   // the game's camera while hidden inside
+  else if (v === 'front') look(0.4, 0.75, 3.0, 0, 0.42, 0.6);
+  else if (v === 'close') look(0.9, 1.9, 3.3, 0, 0.38, 0.3);
+  else if (v === 'top') look(0, 5.2, 1.6, 0, 0.2, -0.1);
+  else if (v === 'side') look(2.6, 2.4, 3.2, 0, 0.35, 0.3);
+  else if (v === 'inside') look(num('ix', 0), 0.3, -hd + 0.07, 0, 0.3, hd);
+  camera.updateProjectionMatrix(); camera.updateMatrixWorld();
+  // the see-through circle around the player's car, as js/game.js sets it (off while hidden inside)
+  if (indoors || !num('cut', 1)) U.uCut.value.z = -1;
+  else { P(_cv, 0, 0.25, 0).project(camera); U.uCut.value.x = _cv.x * 0.5 + 0.5; U.uCut.value.y = _cv.y * 0.5 + 0.5; P(_cv, 0, 0.25, 0).applyMatrix4(camera.matrixWorldInverse); U.uCut.value.z = -_cv.z; }
 }
-function resize() { const w = innerWidth, h = innerHeight; renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix(); }
+let post = null;
+if (makePost) { try { post = makePost(renderer, scene, camera); post.setEnabled(true); } catch (err) { console.warn('post=1: post-processing unavailable', err); post = null; } }
+function resize() { const w = innerWidth, h = innerHeight; renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix(); renderer.getDrawingBufferSize(U.uRes.value); if (post) post.setSize(w, h); }
 addEventListener('resize', resize); resize();
 
 // the demo loop: open, door comes down, police search, door opens again
@@ -127,13 +173,15 @@ function frame(dt, time) {
   const d = demo(time), f = state.f == null ? d.f : state.f, s = state.s == null ? d.s : state.s;
   for (const it of list) { it.h.setClosed(f); it.h.setSearch(s); it.h.update(dt, time); }
   placeCamera();
-  renderer.render(scene, camera);
-  hud.innerHTML = list.map((it, i) => `${i === (state.k | 0) ? '<b>' : ''}${i} ${it.kind}: ${it.h.name}${i === (state.k | 0) ? '</b>' : ''}`).join(' &nbsp;|&nbsp; ') + `<br>view=${state.view}  closed=${f.toFixed(2)}  search=${s.toFixed(2)}  draw calls=${renderer.info.render.calls}  triangles=${renderer.info.render.triangles}<br><span id="map">${kindTable}</span>`;
+  if (post) post.render(dt); else renderer.render(scene, camera);
+  const ki = Math.max(0, Math.min(list.length - 1, state.k | 0));
+  const names = town ? `<b>${ki} ${list[ki].kind}: ${list[ki].h.name}</b> &nbsp; (the real town, ${list.length} hideouts)` : list.map((it, i) => `${i === (state.k | 0) ? '<b>' : ''}${i} ${it.kind}: ${it.h.name}${i === (state.k | 0) ? '</b>' : ''}`).join(' &nbsp;|&nbsp; ');
+  hud.innerHTML = names + `<br>view=${state.view}  closed=${f.toFixed(2)}  search=${s.toFixed(2)}  draw calls=${renderer.info.render.calls}  triangles=${renderer.info.render.triangles}<br><span id="map">${kindTable}</span>`;
 }
 const hud = document.getElementById('hud'), bar = document.getElementById('bar');
 // kindFor(): every hiding-spot kind used in data/map.json, plus an unknown one
 const kindTable = 'kindFor: ' + ['rooftop water tank', 'sack stack', 'covered handcart', 'basket stack', 'drain niche', 'bush or hedge', 'parked bus', 'upturned boat', 'scrap heap', 'something else'].map(k => `${k} &rarr; ${kindFor(k)}`).join(', ');
-for (const v of ['all', 'trio0', 'trio1', 'trio2', 'chase', 'hide', 'close', 'front', 'side', 'top', 'inside']) { const b = document.createElement('button'); b.textContent = v; b.onclick = () => { state.view = v; }; bar.appendChild(b); }
+for (const v of ['all', 'trio0', 'trio1', 'trio2', 'chase', 'chasein', 'lane', 'hide', 'close', 'front', 'side', 'top', 'inside']) { const b = document.createElement('button'); b.textContent = v; b.onclick = () => { state.view = v; }; bar.appendChild(b); }
 { const b = document.createElement('button'); b.textContent = 'next kind'; b.onclick = () => { state.k = ((state.k | 0) + 1) % list.length; }; bar.appendChild(b); }
 { const b = document.createElement('button'); b.textContent = 'roofs'; b.onclick = () => { for (const m of roofMats) m.visible = !m.visible; }; bar.appendChild(b); }
 

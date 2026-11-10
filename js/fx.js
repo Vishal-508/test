@@ -17,8 +17,11 @@ const SKID_CAP = 2048;                         // tyre-mark quads in the ring bu
 const SKID_FADE = 14;                          // seconds until a mark is gone
 const SKID_MIN_LEN = 0.09;                     // a mark quad is stretched until it is this long (saves quads at high frame rates)
 const TRAILS = 16, TRAIL_STRIDE = 8;           // wheels that can be laying a continuous mark at the same time
-const RAIN_MAX = 1500, SPLASH_MAX = 280;       // streaks and splash rings at level 1 on high quality
-const RAIN_BOX = 26, RAIN_HEIGHT = 14, SPLASH_AREA = 20;
+const TRAIL_END = 0.1;                         // a mark not continued for this long has ended and gets a tapered tip
+const RAIN_MAX = 2100, SPLASH_MAX = 280;       // streaks and splash rings at level 1 on high quality
+// The rain box is only as tall as the chase camera ever flies (about 5 to 7 units up, looking down), so the streaks
+// are spent where they can be seen instead of in the air above the view.
+const RAIN_BOX = 26, RAIN_HEIGHT = 9, SPLASH_AREA = 20;
 const GRAVITY = 6;                             // for sparks, units / s^2 (exaggerated so the arcs read at chase-camera distance)
 const REBASE = 2048;                           // the internal clock wraps here so shader floats stay precise for hours
 
@@ -207,7 +210,7 @@ void main() {
   mvPosition.xyz += sideV * ( aC.y * 0.5 * w / max( length( sideV ), 0.0001 ) );
   gl_Position = projectionMatrix * mvPosition;
   vC = aC.xy;
-  vA = uAlpha * ( 0.5 + 0.5 * fract( rnd * 7.31 ) ) * smoothstep( 1.4, 6.0, dist );
+  vA = uAlpha * ( 0.5 + 0.5 * fract( rnd * 7.31 ) ) * smoothstep( 1.3, 4.6, dist );   // none right in front of the lens
   #include <fog_vertex>
 }`;
 
@@ -301,8 +304,9 @@ function markDirty(buf, range, lo, hi) {
 }
 
 // A 256 px atlas of four lumpy smoke puffs. Red is density, green is light/dark mottling: it is a mask and not a
-// colour map, so it stays in linear (no colour space) on purpose. Built once and shared.
-let puffTexture = null;
+// colour map, so it stays in linear (no colour space) on purpose. Built once and shared by every Fx; puffUsers counts
+// the live instances so that dispose() only frees it when the last one goes.
+let puffTexture = null, puffUsers = 0;
 function getPuffTexture() {
   if (puffTexture) return puffTexture;
   const N = 256, C = 128, L = 16, data = new Uint8Array(N * N * 4);
@@ -374,7 +378,8 @@ function poolGeometry(cap, stride, names) {
 }
 
 function noRaycast() {}
-function clamp01(v, fallback) { v = +v; return v >= 0 ? (v > 1 ? 1 : v) : fallback; }
+// clamp to 0..1; a missing or NaN value becomes the fallback (a negative one is a real 0, not "missing")
+function clamp01(v, fallback) { v = +v; return v >= 0 ? (v > 1 ? 1 : v) : v < 0 ? 0 : fallback; }
 
 // two strokes of lightning: a hard flash, a dip, a second weaker one, and out by half a second
 function flashCurve(t) {
@@ -457,6 +462,7 @@ export class Fx {
       this._smokeArr = p.array; this._smokeBuf = p.buf; this._smokeRange = { start: 0, count: 0 };
       this._smokeHead = 0; this._smokeUntil = -1;
       this._smokeU = { uTime, uFlash, uWind: { value: new THREE.Vector2(0.14, 0.06) }, uMap: { value: getPuffTexture() } };
+      puffUsers++;
       this._smokeMesh = add(p.geo, material(SMOKE_VS, SMOKE_FS, this._smokeU, false), 6, 'fx-smoke');
     }
 
@@ -486,6 +492,7 @@ export class Fx {
   // the camera looks at: rain and splashes are drawn around it.
   update(dt, time, focus) {
     dt = dt > 0 ? (dt < 0.25 ? dt : 0.25) : 0;      // same cap as the game loop; NaN and negatives count as 0
+    this._endTrails();
     let t = this._t + dt;
     if (t > REBASE) { this._rebase(REBASE); t -= REBASE; }
     this._t = t;
@@ -639,7 +646,8 @@ export class Fx {
     if (this.group.parent) this.group.parent.remove(this.group);
     for (const m of this._meshes) { this.group.remove(m); m.geometry.dispose(); m.material.dispose(); }
     this._meshes.length = 0;
-    if (puffTexture) puffTexture.dispose();      // shared; three.js uploads it again if another Fx still uses it
+    // the puff texture is shared: free it with the last instance only (a later Fx simply uploads it again)
+    if (--puffUsers <= 0) { puffUsers = 0; if (puffTexture) puffTexture.dispose(); }
     this.flash = 0;
   }
 
@@ -672,6 +680,23 @@ export class Fx {
     this._sparkMesh.visible = true;
     markDirty(this._sparkBuf, this._sparkRange, o, o + SPARK_STRIDE);
     return o;
+  }
+
+  // A tyre mark that has not been continued for TRAIL_END seconds is finished: fade the far edge of its last quad to
+  // nothing, so it ends in a tapered tip like it began instead of a square cut, and free its trail slot. Runs once a
+  // frame over the 16 trail records and touches four floats when a mark ends.
+  _endTrails() {
+    const T = this._trails, D = this._skidData, t = this._t;
+    for (let o = 0; o < T.length; o += TRAIL_STRIDE) {
+      if (T[o + 7] > 0 && t - T[o + 6] > TRAIL_END) {
+        T[o + 7] = 0;
+        if (this._skidSerial - T[o + 5] < SKID_CAP) {          // its last quad is still in the ring
+          const ed = (T[o + 4] | 0) * 8 + 4;
+          D[ed] = 0; D[ed + 2] = 0;
+          markDirty(this._skidDataAttr, this._skidDataRange, ed, ed + 4);
+        }
+      }
+    }
   }
 
   // take the next quad of the tyre-mark ring (the oldest one)

@@ -139,7 +139,7 @@ export function buildWorld(map) {
   sites.forEach(s => poi(s.x, s.y, 1.25));
   escapes.forEach(e => poi(e.x, e.y, 1.5));
   levers.forEach(l => poi(l.x, l.y, 1.0));
-  posts.forEach(p => poi(p.x, p.y, 1.0));
+  posts.forEach(p => poi(p.x, p.y, 1.5));   // room for a jeep to turn round
   spawns.forEach(s => { s.a = poi(s.x, s.y, 1.2); });
 
   // --- solid props and landmark footprints

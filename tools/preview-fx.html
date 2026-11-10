@@ -29,7 +29,7 @@
 //   - a spark burst every second against the post on the right (strength cycles 0.3, 0.65, 1)
 //   - rain at level 0.8, and lightning every 3 seconds whose fx.flash brightens the hemisphere and moon lights
 // Drag to orbit, wheel to zoom.
-// URL options: ?view=chase|close|sparks|top|low  &rain=0.8  &q=high|low  &post=1  &auto=0 (no emitters)  &bolt=0 (no lightning)
+// URL options: ?view=chase|game|close|sparks|top|low  &rain=0.8  &q=high|low  &post=1  &auto=0 (no emitters)  &bolt=0 (no lightning)
 //              &fog=none|exp2 (other fog set-ups)  &gl=1 (force a WebGL 1 context, as on old phones)
 // For scripted checks: window.__P = { fx, freeze(on), step(n, dt), draw(), fxDrawCalls(), setView(name), burst(strength), ... }
 import * as THREE from '../vendor/three.module.min.js';
@@ -115,6 +115,7 @@ function sim(dt) {
 // camera: orbit about a target
 const VIEWS = {
   chase: { t: [0.6, 0.3, 0], yaw: 0, pitch: 0.84, dist: 10.5 },
+  game: { t: [0, 0.3, 0.4], yaw: 0, pitch: 0.7, dist: 7.6 },          // the game's own chase camera at rest (js/game.js S.cam)
   close: { t: [0, 0.4, 0.4], yaw: 0.5, pitch: 0.42, dist: 6 },
   sparks: { t: [3.7, 0.35, 0.4], yaw: 0.25, pitch: 0.4, dist: 4.4 },
   top: { t: [-1.5, 0, 0.3], yaw: 0, pitch: 1.5, dist: 13 },

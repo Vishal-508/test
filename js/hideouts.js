@@ -3,7 +3,9 @@
 //
 // Local space of every hideout: the bay floor is x from -w/2 to +w/2 and z from -d/2 to +d/2 (y up, ground at 0).
 // The mouth is the +Z edge and the lane lies beyond it. The caller positions and rotates the returned group.
-// The middle of the bay (0.6 wide, 1.1 long, below y = 0.5) is always left clear for the parked car.
+// The middle of the bay (0.6 wide, 1.1 long, below y = 0.5) is always left clear for the parked car. Doors that swing
+// (the bungalow gate) cross a corner of that space while they move, but never come within 0.03 of a car of up to
+// 0.42 x 0.4 x 0.86 parked in the middle; every other door drops or slides in the plane of the mouth.
 //
 // Cost per hideout: the props are baked into ONE mesh with vertex colours, the overhead surfaces into one mesh per
 // roof colour (ctx.cutMat), plus the door, a bulb, a light pool, a signboard and (only while searched) the torchlight.
@@ -124,6 +126,7 @@ class Bake {
         g.setAttribute('uv', new THREE.BufferAttribute(lit, 2));   // the light map reads channel 0
       }
     } else g.setAttribute('uv', new THREE.Float32BufferAttribute(this.uvs, 2));
+    if (this.leafy) for (let i = 0; i < this.nor.length; i++) this.nor[i] *= LEAF_NORMAL;
     g.setAttribute('position', new THREE.Float32BufferAttribute(this.pos, 3));
     g.setAttribute('normal', new THREE.Float32BufferAttribute(this.nor, 3));
     g.setIndex(this.idx);
@@ -133,8 +136,12 @@ class Bake {
 }
 
 // Overhead surfaces (roofs, awnings, canopies): same baking, but the colour comes from the ctx.cutMat material.
+// leafy: the game's building material paints every face whose normal ATTRIBUTE points up (y > 0.5) as a flat roof:
+// darker, with slab seams and now and then a lit skylight. Right for a roof slab, wrong for a tree. Lighting
+// normalises the normal, so a leafy bake stores its normals shortened: lit exactly the same, never taken for a roof.
+const LEAF_NORMAL = 0.45;
 class RoofBake extends Bake {
-  constructor() { super(false); }
+  constructor(leafy) { super(false); this.leafy = !!leafy; }
   box(w, h, d, x, y, z, ry = 0, rx = 0, rz = 0) { return this.put(units().box, 0, x, y, z, w, h, d, rx, ry, rz); }
   cyl(rt, rb, h, x, y, z, seg = 8, rx = 0, rz = 0) { return this.put(cylGeo(rt / rb, seg), 0, x, y, z, rb, h, rb, rx, 0, rz); }
   blob(r, x, y, z, sy = 1, rot = 0) { return this.lump(units().ico, 0, x, y, z, r, r * sy, r, rot); }
@@ -360,9 +367,12 @@ const SIGN_STYLE = {
   scrapyard: [['#70492f', '#f0e8d4', '#f0e8d4'], ['#55595c', '#e8c040', '#e8c040']],
 };
 function paintSign(kind, text, seed, aspect) {
-  const W = 256, H = Math.max(32, Math.min(128, Math.round(W / aspect / 8) * 8));
+  // Painted as W x H, the board's own shape, onto a canvas whose height is the next power of two (the picture is
+  // stretched to fit and the board squeezes it back). Old phones on WebGL1 can only mip-map power-of-two textures.
+  const W = 256, H = Math.max(24, Math.min(128, W / aspect)), CH = H > 72 ? 128 : H > 36 ? 64 : 32;
   const styles = SIGN_STYLE[kind] || SIGN_STYLE.garage, st = styles[Math.abs(seed) % styles.length], r = rng(seed + 99);
-  return canvasTex(W, H, c => {
+  return canvasTex(W, CH, c => {
+    c.scale(1, CH / H);
     c.fillStyle = st[0]; c.fillRect(0, 0, W, H);
     const g = c.createLinearGradient(0, 0, 0, H); g.addColorStop(0, 'rgba(255,255,255,0.14)'); g.addColorStop(1, 'rgba(0,0,0,0.3)');
     c.fillStyle = g; c.fillRect(0, 0, W, H);
@@ -382,7 +392,7 @@ function paintSign(kind, text, seed, aspect) {
 }
 
 // ---------------------------------------------------------------- shared materials and geometries
-function hingedGeo(x0, x1, y0, y1) { // flat panel with white vertex colours; its hinge is the mesh origin
+function hingedGeo(x0, x1, y0, y1) { // flat panel with white vertex colours; its hinge (or top edge) is the mesh origin
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute([x0, y0, 0, x1, y0, 0, x0, y1, 0, x1, y1, 0], 3));
   g.setAttribute('normal', new THREE.Float32BufferAttribute([0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1], 3));
@@ -413,7 +423,9 @@ function torchGeos() {
 let SH = null;
 function shared() {
   if (SH) return SH;
-  const doorMat = map => new THREE.MeshLambertMaterial({ map, vertexColors: true, transparent: true, depthWrite: false, side: THREE.DoubleSide });
+  // forceSinglePass: a door is one flat sheet, so it needs no separate back and front pass. Without it three.js draws
+  // every transparent double-sided mesh twice and looks its shader program up again each time, every frame.
+  const doorMat = map => new THREE.MeshLambertMaterial({ map, vertexColors: true, transparent: true, depthWrite: false, side: THREE.DoubleSide, forceSinglePass: true });
   const tex = {
     shutter: canvasTex(128, 128, paintShutter, true, 2), planks: canvasTex(128, 128, paintPlanks, false, 2),
     tin: canvasTex(128, 128, paintTin, true, 2), tarp: canvasTex(128, 128, paintTarp, true, 2),
@@ -431,7 +443,7 @@ function shared() {
     bulbGeo: new THREE.SphereGeometry(1, 8, 6),
     signGeo: new THREE.PlaneGeometry(1, 1),
     leafGeo: hingedGeo(0, 1, 0, 1),        // gate leaf, hinge down its left edge
-    hangGeo: hingedGeo(-0.5, 0.5, -1, 0),  // grille, hinge along its top edge
+    hangGeo: hingedGeo(-0.5, 0.5, -1, 0),  // grille, hanging from its top edge
     torchOver: torch.over, torchUnder: torch.under,
     plainRoof: new Map(), lampTex: new Map(),
   };
@@ -457,7 +469,11 @@ function cutMaterial(ctx, hex) {
   let map = fn ? CUT_CACHE.get(fn) : shared().plainRoof;
   if (!map) CUT_CACHE.set(fn, map = new Map());
   let mat = map.get(hex);
-  if (!mat) { mat = fn ? fn(hex) : null; if (!mat || !mat.isMaterial) mat = new THREE.MeshLambertMaterial({ color: hex }); map.set(hex, mat); }
+  if (!mat) {
+    try { mat = fn ? fn(hex) : null; } catch (err) { mat = null; }             // a broken cutMat must not take the town down with it
+    if (!mat || !mat.isMaterial) mat = new THREE.MeshLambertMaterial({ color: hex });
+    map.set(hex, mat);
+  }
   return mat;
 }
 
@@ -549,15 +565,19 @@ function gateDoor(parent, S, leafW, hgt, y0, z, hingeX) {
   };
 }
 
-// an iron grille hinged under the lid that drops across the mouth (culvert)
+// an iron grille that drops straight down in its guide channels, like a sluice gate (culvert).
+// Raised, it stands above the lid; it never swings through the space where the car is parked.
 function hangDoor(parent, S, wid, hgt, top, z) {
   const mesh = new THREE.Mesh(S.hangGeo, S.door.grille);
-  mesh.scale.set(wid, hgt, 1); mesh.position.set(0, top, z); parent.add(mesh);
-  let ang = 1.5, shut = 0;
+  mesh.scale.set(wid, hgt, 1); mesh.position.set(0, top + hgt, z); parent.add(mesh);
+  let y = top + hgt, shut = 0;
   return {
     top, h: hgt, z, span: wid / 2 - 0.16, live: false, solid: 0.45,
-    set(f) { shut = f; ang = (1 - f * f) * 1.5; mesh.rotation.x = ang; },   // falls faster and faster, like a dropped grate
-    pose(a, b) { mesh.rotation.x = ang + Math.abs(a) * 0.1 * shut; mesh.position.x = b * 0.014 * shut; },
+    set(f) { shut = f; y = top + (1 - f * f) * hgt; mesh.position.y = y; },   // falls faster and faster, like a dropped grate
+    pose(a, b) { // someone outside heaves at it: it jumps in its channels and clatters back
+      mesh.position.y = y + Math.abs(a) * 0.03 * shut; mesh.position.x = b * 0.012 * shut;
+      mesh.rotation.z = b * 0.012 * shut; mesh.rotation.x = a * 0.02 * shut;
+    },
     dispose() { },
   };
 }
@@ -570,9 +590,9 @@ function linerWalls(B, hw, hd, h, upper, lower, dado, sides) { // thin inner wal
   B.box(hw * 2, h, t, 0, h / 2, -hd + t / 2, upper);
   if (dado) B.box(hw * 2 - t * 2, dado, 0.01, 0, dado / 2 + 0.012, -hd + t + 0.005, lower);
   if (!sides) return;
-  for (const s of [-1, 1]) {
-    B.box(t, h, hd * 2, s * (hw - t / 2), h / 2, 0, upper);
-    if (dado) B.box(0.01, dado, hd * 2 - t, s * (hw - t - 0.005), dado / 2 + 0.012, t / 2, lower);
+  for (const s of [-1, 1]) { // the side walls stop just short of the mouth, so they share no face with door posts and pillars there
+    B.box(t, h, hd * 2 - 0.006, s * (hw - t / 2), h / 2, -0.003, upper);
+    if (dado) B.box(0.01, dado, hd * 2 - t - 0.006, s * (hw - t - 0.005), dado / 2 + 0.012, t / 2 - 0.003, lower);
   }
 }
 function tyre(B, x, y, z, rx = 0, rz = 0, r = 0.11) {
@@ -599,12 +619,12 @@ const BUILD = {
     B.box(0.36, 0.003, 0.28, -0.05, 0.0135, 0.16, 0x2a2b2e, 0.3); B.box(0.2, 0.003, 0.16, 0.1, 0.0135, -0.32, 0x303134, -0.5);
     linerWalls(B, hw, hd, 0.6, wall, dado, 0.21, true);
     const slab = o.R(0x666a72), trim = o.R(0x4e525a);
-    slab.box(w, 0.07, d, 0, 0.635, 0);
+    slab.box(w, 0.07, d - 0.012, 0, 0.635, -0.006);                            // stops just behind the face of the shutter housing
     trim.box(w, 0.05, 0.06, 0, 0.695, back + 0.03); trim.box(0.06, 0.05, d, -hw + 0.03, 0.695, 0); trim.box(0.06, 0.05, d, hw - 0.03, 0.695, 0);
     const tk = r() < 0.5 ? -1 : 1;                                             // water tank on the roof
     trim.cyl(0.15, 0.16, 0.2, tk * 0.42, 0.77, -0.55, 10); trim.cyl(0.07, 0.09, 0.04, tk * 0.42, 0.89, -0.55, 8);
     B.box(w, 0.1, 0.1, 0, 0.615, hd - 0.05, 0x4c5158);                          // shutter drum housing
-    for (const s of [-1, 1]) B.box(0.04, 0.57, 0.07, s * (hw - 0.02), 0.285, hd - 0.05, 0x3c4046);
+    for (const s of [-1, 1]) B.box(0.055, 0.57, 0.07, s * (hw - 0.0275), 0.285, hd - 0.05, 0x3c4046);   // shutter channels, proud of the walls
     const bx = -0.2;                                                           // workbench, vice, tool board
     B.box(0.74, 0.03, 0.2, bx, 0.2, back + 0.15, 0x73593c);
     B.box(0.03, 0.19, 0.16, bx - 0.33, 0.105, back + 0.15, 0x4e3d2a); B.box(0.03, 0.19, 0.16, bx + 0.33, 0.105, back + 0.15, 0x4e3d2a);
@@ -668,7 +688,7 @@ const BUILD = {
     B.box(w - 0.06, 0.035, 0.035, 0, 0.615, hd - 0.06, wood); B.box(w - 0.06, 0.035, 0.035, 0, 0.565, back + 0.06, wood);
     for (const s of [-1, 1]) B.box(0.03, 0.03, d - 0.1, s * (hw - 0.06), 0.6, 0, wood, 0, -0.035);
     const a = o.R(0x626a70), b = o.R(pick(r, [0x70543f, 0x5a5448, 0x6a5a3a]));     // patchwork of tin sheets
-    for (let i = 0; i < 3; i++) (i % 2 ? b : a).box(0.56, 0.02, d + 0.02, (i - 1) * 0.5, 0.655 + i * 0.008, 0.02, 0, -0.055 - i * 0.006, (i - 1) * 0.02);
+    for (let i = 0; i < 3; i++) (i % 2 ? b : a).box(w / 3 + 0.06, 0.02, d + 0.02, (i - 1) * w / 3, 0.655 + i * 0.008, 0.02, 0, -0.055 - i * 0.006, (i - 1) * 0.02);
     b.box(0.2, 0.05, 0.12, -0.3, 0.7, -0.4, 0.4); a.cyl(0.1, 0.1, 0.05, 0.36, 0.7, 0.25, 10);      // brick and tyre hold the sheets down
     B.box(1.12, 0.06, 0.3, 0, 0.11, back + 0.2, 0x6a5234);                       // takht with baskets of vegetables
     for (const s of [-1, 1]) B.box(0.05, 0.08, 0.26, s * 0.5, 0.04, back + 0.2, 0x4a3824);
@@ -706,9 +726,13 @@ const BUILD = {
     for (let i = 0; i < 4; i++) B.box(0.08, 0.035, 0.045, hw - 0.14 + (r() - 0.5) * 0.06, 0.12 + (i > 2 ? 0.036 : 0), -0.1 + (i % 3) * 0.1, 0x7a4030, r() * 0.6);
     B.box(0.015, 0.015, 0.4, hw - 0.055, 0.44, 0.2, 0x3a2a22); B.box(0.015, 0.3, 0.015, hw - 0.055, 0.3, 0.39, 0x3a2a22);    // old pipe
     o.sign = { x: 0, y: 0.64, z: hd + 0.005, w: 0.78, h: 0.1, rz: 0 };
-    o.lamp = { x: 0, y: 0.795, z: hd - 0.02, r: 0.028, hex: 0xc9ffb0, dim: 0.55 };
-    B.box(0.09, 0.03, 0.06, 0, 0.775, hd - 0.03, 0x2a2c30);
-    o.door = hangDoor(o.g, o.S, w - 0.26, 0.535, 0.55, hd - 0.06);
+    const gw = w - 0.26, gz = hd - 0.012, rust = 0x5a3a2a;                      // sluice frame: the raised grille stands in it, above the lid
+    for (const s of [-1, 1]) B.box(0.035, 0.59, 0.045, s * (gw / 2 + 0.01), 0.87, gz, rust);
+    B.box(gw + 0.09, 0.04, 0.05, 0, 1.17, gz, rust);
+    B.box(0.016, 0.09, 0.016, 0, 1.225, gz, 0x3a3e44); B.cyl(0.055, 0.055, 0.014, 0, 1.25, gz + 0.02, 0x6a4030, 8, PI / 2);   // spindle and hand wheel
+    o.lamp = { x: 0, y: 0.8, z: hd + 0.04, r: 0.028, hex: 0xc9ffb0, dim: 0.55 };   // bulkhead lamp, just in front of the raised grille
+    B.box(0.08, 0.025, 0.06, 0, 0.775, hd + 0.022, 0x2a2c30);
+    o.door = hangDoor(o.g, o.S, gw, 0.545, 0.56, gz);
   },
 
   // bungalow car porch with an iron gate
@@ -719,12 +743,16 @@ const BUILD = {
     for (const s of [-1, 1]) B.box(0.15, 0.003, d - 0.1, s * 0.2, 0.0135, 0, 0x7e786a);        // two paved wheel strips
     B.box(w - 0.02, 0.003, 0.04, 0, 0.0135, hd - 0.02, 0x8a8474);
     linerWalls(B, hw, hd, 0.62, cream, oxide, 0.12, false);
-    o.R(0x74706a).box(w, 0.06, d, 0, 0.65, 0);
+    o.R(0x74706a).box(w - 0.02, 0.06, d - 0.02, 0, 0.65, -0.01);                 // the slab sits inside its fascia
     const fascia = o.R(oxide); fascia.box(w, 0.12, 0.05, 0, 0.64, hd - 0.025); fascia.box(0.05, 0.1, d - 0.05, -hw + 0.025, 0.64, -0.025); fascia.box(0.05, 0.1, d - 0.05, hw - 0.025, 0.64, -0.025);
+    // Each gate leaf swings in an arc about its post. The leaf is no wider than lets that arc pass 0.03 clear of the
+    // front corner of the biggest car (0.42 x 0.86, parked in the middle); a wider bay gets a stub of wall beside each post.
+    const gz = hd - 0.03, reach = gz - 0.43, leaf = Math.max(0.3, Math.min(hw - 0.1, (0.0441 + reach * reach - 0.0009) / 0.48));
     for (const s of [-1, 1]) {
       for (const z of [hd - 0.3, -0.25]) { B.box(0.075, 0.6, 0.075, s * (hw - 0.045), 0.31, z, cream); B.box(0.1, 0.03, 0.1, s * (hw - 0.045), 0.585, z, cream); }
-      B.box(0.11, 0.5, 0.11, s * (hw - 0.055), 0.25, hd - 0.06, cream); B.box(0.14, 0.03, 0.14, s * (hw - 0.055), 0.515, hd - 0.06, oxide);   // gate posts
-      const h0 = back + 0.06, h1 = Math.max(h0 + 0.4, hd - 0.2 - (hw - 0.1)), hn = Math.max(3, Math.round((h1 - h0) / 0.22));   // hedge, clear of the open gate leaf
+      B.box(0.11, 0.5, 0.11, s * (leaf + 0.045), 0.25, hd - 0.06, cream); B.box(0.14, 0.03, 0.14, s * (leaf + 0.045), 0.515, hd - 0.06, oxide);   // gate posts
+      if (hw - leaf > 0.14) { B.box(hw - leaf - 0.1, 0.4, 0.07, s * (hw + leaf + 0.1) / 2, 0.2, hd - 0.06, cream); B.box(hw - leaf - 0.1, 0.03, 0.09, s * (hw + leaf + 0.1) / 2, 0.415, hd - 0.06, oxide); }
+      const h0 = back + 0.06, h1 = Math.max(h0 + 0.4, hd - 0.2 - leaf), hn = Math.max(3, Math.round((h1 - h0) / 0.22));   // hedge, clear of the open gate leaf
       B.box(0.13, 0.3, h1 - h0, s * (hw - 0.085), 0.162, (h0 + h1) / 2, g2);
       for (let i = 0; i < hn; i++) B.blob(0.085 + r() * 0.03, s * (hw - 0.085 + (r() - 0.5) * 0.03), 0.31 + r() * 0.04, h0 + 0.06 + i * (h1 - h0 - 0.12) / (hn - 1), i % 2 ? g1 : g2, 0.75, r() * 3);
       B.blob(0.065, s * (hw - 0.04), 0.545, hd - 0.31, g1, 0.8, r() * 3); B.blob(0.05, s * (hw - 0.035), 0.42, hd - 0.38, g2, 1, r() * 3);   // creeper on the pillar
@@ -739,7 +767,7 @@ const BUILD = {
     o.sign = { x: 0, y: 0.645, z: hd + 0.006, w: 0.72, h: 0.085, rz: 0 };
     o.lamp = { x: 0, y: 0.54, z: hd - 0.025, r: 0.032, hex: 0xfff1d6 };
     B.box(0.012, 0.03, 0.012, 0, 0.585, hd - 0.025, 0x2a2c30);
-    o.door = gateDoor(o.g, o.S, hw - 0.1, 0.46, 0.014, hd - 0.06, hw - 0.1);
+    o.door = gateDoor(o.g, o.S, leaf, 0.46, 0.014, gz, leaf);
   },
 
   // a clump of trees in the open park: no walls, no roof, the branches come down
@@ -747,8 +775,8 @@ const BUILD = {
     const { B, r, hw, hd } = o, back = -hd;
     const bark = 0x4a382a, greens = [0x245a34, 0x2c6436, 0x1f4f30], bush = [0x2a5c36, 0x234c2e, 0x33683a];
     const spots = [[-hw - 0.24, -0.55], [hw + 0.26, -0.3], [-hw - 0.2, 0.6], [hw + 0.22, 0.72], [-0.48, back - 0.26], [0.5, back - 0.3]];
-    if (r() < 0.6) spots.push([0.02, back - 0.42]);
-    const crowns = [o.R(greens[0]), o.R(greens[1])];
+    if (r() < 0.6) spots.push([0.02, back - 0.32]);                              // trunks stay within 0.5 of the rectangle
+    const crowns = [o.R(greens[0], true), o.R(greens[1], true)];
     spots.forEach(([x, z], i) => {                                             // 6 or 7 trees round the three closed sides
       x += (r() - 0.5) * 0.12; z += (r() - 0.5) * 0.12;
       const h = 0.78 + r() * 0.3, lean = (r() - 0.5) * 0.12;
@@ -766,19 +794,22 @@ const BUILD = {
     B.blob(0.08, hw - 0.06, 0.04, 0.95, 0x6a6c6e, 0.7, 1); B.blob(0.06, hw - 0.2, 0.03, -0.75, 0x5c5e60, 0.7, 2); B.blob(0.07, -hw + 0.1, 0.035, -0.5, 0x646668, 0.7, 3);
     B.cyl(0.018, 0.024, 0.66, hw - 0.02, 0.33, hd - 0.05, bark, 5, 0, 0.05);      // stick that carries the lantern
     B.box(0.34, 0.016, 0.016, hw - 0.19, 0.64, hd - 0.05, bark);
-    B.box(0.006, 0.07, 0.006, 0.42, 0.6, hd - 0.05, 0x1c1c1e); B.cyl(0.02, 0.03, 0.02, 0.42, 0.575, hd - 0.05, 0x2a2c30, 6); B.cyl(0.028, 0.028, 0.014, 0.42, 0.508, hd - 0.05, 0x2a2c30, 6);
-    o.lamp = { x: 0.42, y: 0.54, z: hd - 0.05, r: 0.026, hex: 0xffc070 };
+    const lx = hw - 0.33;                                                       // the lantern hangs from the end of that stick, whatever the width
+    B.box(0.006, 0.07, 0.006, lx, 0.6, hd - 0.05, 0x1c1c1e); B.cyl(0.02, 0.03, 0.02, lx, 0.575, hd - 0.05, 0x2a2c30, 6); B.cyl(0.028, 0.028, 0.014, lx, 0.508, hd - 0.05, 0x2a2c30, 6);
+    o.lamp = { x: lx, y: 0.54, z: hd - 0.05, r: 0.026, hex: 0xffc070 };
     // the moving part: a leafy canopy over the middle plus hanging branches at the mouth
     const canopy = new THREE.Group(); o.g.add(canopy);
-    const cb = new RoofBake(), hex = greens[2];
-    cb.blob(0.66, 0, 0.92, -0.32, 0.32, 0.4); cb.blob(0.58, -0.2, 0.9, 0.4, 0.32, 1.7); cb.blob(0.56, 0.28, 0.93, 0.36, 0.3, 2.9); cb.blob(0.4, 0.3, 0.98, -0.5, 0.34, 4.1);
-    cb.lump(units().ico, 0, 0, 0.8, hd - 0.17, hw + 0.1, 0.12, 0.19, 2.2);    // leafy lintel hides the top of the hanging branches
+    const cb = new RoofBake(true), hex = greens[2];
+    // Its underside stays above y = 0.7 even when lowered, so the camera that sits inside (the game puts it at y = 0.62
+    // in a grove) looks out under the leaves instead of into them.
+    cb.blob(0.66, 0, 1.06, -0.32, 0.32, 0.4); cb.blob(0.58, -0.2, 1.04, 0.4, 0.32, 1.7); cb.blob(0.56, 0.28, 1.07, 0.36, 0.3, 2.9); cb.blob(0.4, 0.3, 1.12, -0.5, 0.34, 4.1);
+    for (let i = -1; i <= 1; i++) cb.lump(units().ico, 0, i * hw * 0.72, 0.94 + (i ? 0 : 0.03), hd - 0.17, hw * 0.5 + 0.08, 0.13, 0.2, 2.2 + i * 1.3);   // leafy lintel hides the straight top edge of the hanging branches
     const cgeo = cb.build(); o.own.push(cgeo);
     canopy.add(new THREE.Mesh(cgeo, cutMaterial(o.ctx, hex)));
-    const fringe = dropDoor(canopy, o.S.door.vines, o.w + 0.1, 0.62, 0.77, hd - 0.04, reps(o.w + 0.1, 0.8), 0xffffff, true);
+    const fringe = dropDoor(canopy, o.S.door.vines, o.w + 0.1, 0.75, 0.9, hd - 0.04, reps(o.w + 0.1, 0.8), 0xc4ccc4, true);
     let low = 0;
     o.door = {
-      top: 0.64, h: 0.62, z: hd - 0.04, span: hw - 0.14, live: true, solid: 0.5,
+      top: 0.77, h: 0.75, z: hd - 0.04, span: hw - 0.14, live: true, solid: 0.5,
       set(f) { low = f * f * (3 - 2 * f); canopy.position.y = -0.13 * low; fringe.set(f); },
       pose(a, b, time, ph) {
         canopy.rotation.z = Math.sin(time * 0.7 + ph) * 0.014 + a * 0.03; canopy.rotation.x = Math.sin(time * 0.93 + ph * 1.7) * 0.011 + b * 0.014;
@@ -799,7 +830,7 @@ const BUILD = {
     for (const sx of [-1, 1]) for (const sz of [-1, 1]) { B.box(0.05, 0.66, 0.05, sx * (hw - 0.035), 0.33, sz * (hd - 0.045), steel); B.box(0.056, 0.12, 0.056, sx * (hw - 0.035), 0.075, sz * (hd - 0.045), 0x9a8428); }
     const tin = o.R(0x5a6870), rib = o.R(0x46525a);
     tin.box(w, 0.022, d + 0.04, 0, 0.695, 0.02, 0, -0.04);
-    for (let i = -2; i <= 2; i++) rib.box(0.03, 0.02, d + 0.04, i * 0.34, 0.712, 0.02, 0, -0.04);
+    for (let i = -2; i <= 2; i++) rib.box(0.03, 0.02, d + 0.04, i * (hw - 0.07) / 2, 0.712, 0.02, 0, -0.04);
     B.box(w, 0.07, 0.03, 0, 0.665, hd - 0.02, 0x8a7a2c);                         // painted fascia
     const cx = -hw + 0.23, cz = -0.12, len = 1.62;                              // the bus
     B.box(0.42, 0.26, len, cx, 0.2, cz, body); B.box(0.42, 0.15, len, cx, 0.405, cz, cream); B.box(0.4, 0.035, len - 0.04, cx, 0.497, cz, 0xb0a890);
@@ -917,6 +948,8 @@ function nameFor(kind, seed) {
 
 // ---------------------------------------------------------------- public builder
 // Builds one hideout. spec: { kind, w, d, seed }. ctx: { cutMat(hex), makeLabel(text, opts) }.
+// w and d default to 1.5 and 2.0, the size everything was laid out for; other sizes work (the game's park groves are
+// 2 x 2) and are held to 1.2 .. 4 wide and 1.6 .. 4 deep.
 // spec.kind may be one of HIDEOUT_KINDS or an old kind from the map (it goes through kindFor). The name is painted
 // on the hideout's signboard; a floating name tag is only made when spec.label === true (the game draws its own).
 // Returns { g, kind, name, label, setClosed, setSearch, update, dispose }.
@@ -931,14 +964,15 @@ export function buildHideout(spec, ctx) {
   spec = spec || {}; ctx = ctx || {};
   const S = shared();
   const kind = HIDEOUT_KINDS.indexOf(spec.kind) >= 0 ? spec.kind : kindFor(spec.kind);
-  const w = spec.w > 0 ? +spec.w : 1.5, d = spec.d > 0 ? +spec.d : 2.0, seed = Math.floor(+spec.seed || 0) | 0;
+  const size = (v, def, lo, hi) => { v = +v; return v > 0 ? Math.max(lo, Math.min(hi, v)) : def; };   // NaN, 0 and negatives give the default
+  const w = size(spec.w, 1.5, 1.2, 4), d = size(spec.d, 2.0, 1.6, 4), seed = Math.floor(+spec.seed || 0) | 0;
   const kindNo = HIDEOUT_KINDS.indexOf(kind), hw = w / 2, hd = d / 2;
   const name = nameFor(kind, seed);
   const g = new THREE.Group(); g.name = 'hideout:' + kind;
   const roofs = new Map(), own = [];
   const o = {
     S, ctx, g, w, d, hw, hd, seed, own, r: rng(seed * 7919 + kindNo * 104729 + 17), B: new Bake(true),
-    R(hex) { let b = roofs.get(hex); if (!b) roofs.set(hex, b = new RoofBake()); return b; },   // overhead surfaces of one colour
+    R(hex, leafy) { let b = roofs.get(hex); if (!b) roofs.set(hex, b = new RoofBake(leafy)); return b; },   // overhead surfaces of one colour
     door: null, lamp: null, sign: null,
   };
   BUILD[kind](o);
@@ -960,7 +994,7 @@ export function buildHideout(spec, ctx) {
   glowGeo.setAttribute('uv', new THREE.Float32BufferAttribute([0, 0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 0, 0, 1, 1, 1], 2));
   glowGeo.setIndex([0, 2, 1, 2, 3, 1, 4, 5, 6, 6, 5, 7]);
   glowGeo.computeBoundingSphere(); own.push(glowGeo);
-  const glowMat = new THREE.MeshBasicMaterial({ map: S.tex.glow, color: L.hex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
+  const glowMat = new THREE.MeshBasicMaterial({ map: S.tex.glow, color: L.hex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, forceSinglePass: true });
   const glow = new THREE.Mesh(glowGeo, glowMat); g.add(glow);
   own.push(bulbMat, glowMat);
 
@@ -1008,7 +1042,7 @@ export function buildHideout(spec, ctx) {
   }
   function setSearch(level) { st.search = clamp01(+level || 0); }
   function update(dt, time) {
-    dt = dt > 0 ? Math.min(dt, 0.1) : 0.016; time = +time || 0;
+    dt = dt > 0 ? Math.min(dt, 0.1) : 0.016; time = +time; if (!(time > -1e9 && time < 1e9)) time = 0;
     if (st.lamp > 0.012) {                                                    // bulb flicker with the odd brown-out
       const dip = Math.sin(time * 1.3 + ph * 5) * Math.sin(time * 0.37 + ph * 3) > 0.9 ? 0.45 + 0.45 * Math.sin(time * 43) : 0;
       lampTo(st.lamp * (1 - 0.05 * (1 + Math.sin(time * 19 + ph) * Math.sin(time * 7.3 + ph * 2)) - dip * 0.5));

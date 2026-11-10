@@ -62,7 +62,7 @@ kbd{font-family:ui-monospace,Menlo,monospace;font-size:.82em;background:#1b2540;
 /* ---------- HUD */
 #hud{position:fixed;inset:0;pointer-events:none;z-index:10}
 #hud>*{pointer-events:none}
-#topbar{position:absolute;top:calc(8px + var(--sat));left:calc(10px + var(--sal));right:calc(10px + var(--sar));display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+#topbar{z-index:1;position:absolute;top:calc(8px + var(--sat));left:calc(10px + var(--sal));right:calc(10px + var(--sar));display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
 .pill{font-family:var(--display);font-weight:800;border-radius:999px;padding:3px 14px;background:var(--panel);border:1px solid var(--line);white-space:nowrap}
 #role.chor{color:var(--loot);border-color:rgba(243,180,63,.6)} #role.police{color:var(--police);border-color:rgba(106,152,255,.6)}
 #left{display:flex;flex-direction:column;gap:6px;align-items:flex-start;min-width:0}
@@ -132,13 +132,14 @@ body.touch #prompt{bottom:calc(214px + var(--sab))}
 @media (max-width:560px){ #mini{width:112px;height:112px} #loot{min-width:104px;font-size:.86rem} #timer{font-size:1.6rem} body.touch #corner{top:calc(184px + var(--sat))}
   #role{display:none} #wanted{min-width:0;font-size:.8rem;letter-spacing:.03em;padding:3px 8px} #status{min-width:0;font-size:.7rem;padding:3px 8px} #topbar{gap:6px}
   body.touch #dash{left:calc(12px + var(--sal));transform:none;align-items:flex-start;bottom:calc(12px + var(--sab))} body.touch #nitro{width:110px}
+  body.touch #prompt{bottom:48%}
   body.hiding #mini{display:none} #hideText{white-space:normal;width:88vw;text-align:center;font-size:.92rem;letter-spacing:.08em} #hideBars{top:calc(9vh + 62px)} body.hiding.touch #corner{top:calc(9vh + 150px)}
   #feed{left:calc(10px + var(--sal));right:calc(132px + var(--sar));top:calc(104px + var(--sat));transform:none;width:auto;align-items:flex-start} #feed div{border-radius:12px;text-align:left;font-size:.86rem} #phase{max-width:120px} }
 @media (max-height:460px){ #prompt{bottom:calc(92px + var(--sab));padding:5px 12px} body.touch #prompt{bottom:auto;top:calc(96px + var(--sat))} #banner{top:24%;font-size:1.7rem} #help{display:none}
   #mini{width:100px;height:100px;top:calc(58px + var(--sat))} body.touch #corner{top:calc(84px + var(--sat));left:calc(10px + var(--sal));right:auto;flex-direction:row;gap:6px} #corner button{font-size:.72rem;padding:.25em .55em}
   .card{padding:14px;gap:9px} .title{font-size:2.1rem} .result{font-size:1.7rem} #feed{top:calc(60px + var(--sat))} #feed div{font-size:.84rem}
   #btnAct{width:78px;height:78px;bottom:calc(18px + var(--sab))} #btnNitro{width:60px;height:60px;right:calc(104px + var(--sar));bottom:calc(12px + var(--sab))} #btnBrake{width:56px;height:56px;right:calc(30px + var(--sar));bottom:calc(104px + var(--sab))}
-  #bust{top:30%} #dash{bottom:calc(8px + var(--sab))} #speed b{font-size:1.8rem} }
+  #bust{top:30%} body.touch #bust{top:calc(146px + var(--sat))} #dash{bottom:calc(8px + var(--sab))} #speed b{font-size:1.8rem} }
 @media (prefers-reduced-motion:reduce){ #feed div,#threat{animation:none} }
 </style>
 </head>
