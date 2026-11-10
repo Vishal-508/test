@@ -12,8 +12,8 @@
 // Everything here is decoration: nothing is solid, nothing is written to the world grid, and every
 // board hangs flat on a wall so no road is narrowed.
 //
-// Cost: 7 draw calls (boards, wall and road glow, two groups of flickering signs, tanks, roof boxes,
-// aerials) and ONE 1024 x 512 texture (2 MB before mipmaps). No lights, no per-frame allocations.
+// Cost: 6 draw calls (boards, wall and road glow, the lit tubes of the flickering signs, tanks, roof
+// boxes, aerials) and ONE 1024 x 512 texture (2 MB before mipmaps). No lights, no per-frame allocations.
 //
 // How the boards stay cheap: the atlas holds white "tube" lettering on dark boards, and each quad
 // tints it with a vertex colour brighter than white, so the same cell can be pink on one shop and
@@ -317,19 +317,21 @@ function dropAtlas() { if (ATLAS && --ATLAS.refs <= 0) { ATLAS.tex.dispose(); AT
 // ---------------------------------------------------------------- geometry helpers
 // Collects textured, tinted quads and bakes them into one BufferGeometry (one draw call).
 class Quads {
-  constructor() { this.pos = []; this.uv = []; this.col = []; this.idx = []; this.n = 0; }
-  // corners counter-clockwise as seen from the front; uv is [u0, v0, u1, v1] laid over them in that order
+  constructor() { this.pos = []; this.uv = []; this.col = []; this.idx = []; this.n = 0; this.phase = 0; this.ph = []; }
+  // corners counter-clockwise as seen from the front; uv is [u0, v0, u1, v1] laid over them in that order.
+  // Every quad also records this.phase (0..1), which the flicker shader reads as the sign's own rhythm.
   quad(a, b, c, d, uv, rgb) {
     this.pos.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2], d[0], d[1], d[2]);
     this.uv.push(uv[0], uv[1], uv[2], uv[1], uv[2], uv[3], uv[0], uv[3]);
-    for (let k = 0; k < 4; k++) this.col.push(rgb[0], rgb[1], rgb[2]);
+    for (let k = 0; k < 4; k++) { this.col.push(rgb[0], rgb[1], rgb[2]); this.ph.push(this.phase); }
     this.idx.push(this.n, this.n + 1, this.n + 2, this.n, this.n + 2, this.n + 3); this.n += 4;
   }
-  build() {
+  build(withPhase) {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(this.pos), 3));
     g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(this.uv), 2));
     g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(this.col), 3));
+    if (withPhase) g.setAttribute('flick', new THREE.BufferAttribute(new Float32Array(this.ph), 1));
     g.setIndex(new THREE.BufferAttribute(this.n > 65535 ? new Uint32Array(this.idx) : new Uint16Array(this.idx), 1));
     return g;
   }
@@ -381,12 +383,14 @@ function takeRoofShapes() {
 }
 function dropRoofShapes() { if (ROOF && --ROOF.refs <= 0) { ROOF.tank.dispose(); ROOF.box.dispose(); ROOF.aerial.dispose(); ROOF = null; } }
 
-// Two small shader changes, applied through onBeforeCompile:
-//  - U (optional): the game cuts a see-through circle into whatever stands between the camera and the player's
-//    car (js/scene.js, makeBuildingMaterial). Given the same uniforms, dressing is cut the same way, so no sign
-//    or water tank is left hanging in that hole.
-//  - light: additive glow must fade to nothing in fog. The stock fog fades to the fog colour, and adding that
-//    on top of the scene would leave faint boxes in the distance.
+// Small shader changes, applied through onBeforeCompile. opts:
+//   U      (optional) the game cuts a see-through circle into whatever stands between the camera and the player's
+//          car (js/scene.js, makeBuildingMaterial). Given the same uniforms, dressing is cut the same way, so no
+//          sign or water tank is left hanging in that hole.
+//   light  additive glow must fade to nothing in fog. The stock fog fades to the fog colour, and adding that on
+//          top of the scene would leave faint boxes in the distance.
+//   clock  { value: seconds }: the tubes of the failing signs. Each sign carries its own phase in the `flick`
+//          attribute, so one draw call holds them all and yet no two stutter in step.
 const FOG_TO_BLACK = `#ifdef USE_FOG
           #ifdef FOG_EXP2
             gl_FragColor.rgb *= exp( - fogDensity * fogDensity * vFogDepth * vFogDepth );
@@ -394,18 +398,32 @@ const FOG_TO_BLACK = `#ifdef USE_FOG
             gl_FragColor.rgb *= 1.0 - smoothstep( fogNear, fogFar, vFogDepth );
           #endif
         #endif`;
-function tweak(mat, U, light) {
-  if (!U && !light) return mat;
+// Steady for most of its cycle (4 to 6 seconds long), then a burst of stutter; every other sign also goes dark
+// for a moment first. The stutter is kept gentle on the eye: ten steps a second at most, dipping to dim, not to black.
+const FLICKER = `{
+          float cycF = fract( uFlick * ( 0.17 + 0.08 * flick ) + flick * 7.0 );
+          float rndF = fract( sin( floor( uFlick * 10.0 + flick * 53.0 ) * 12.9898 + flick * 78.233 ) * 43758.5453 );
+          vFlick = cycF > 0.3 ? 1.0 : ( cycF < 0.09 * step( 0.5, flick ) ? 0.0 : mix( 0.18, 1.0, step( 0.45, rndF ) ) );
+        }`;
+function tweak(mat, opts) {
+  const U = opts.U, light = !!opts.light, clock = opts.clock;
+  if (!U && !light && !clock) return mat;
   mat.onBeforeCompile = sh => {
-    if (light) sh.fragmentShader = sh.fragmentShader.replace('#include <fog_fragment>', FOG_TO_BLACK);
-    if (!U) return;
-    sh.uniforms.uCut = U.uCut; sh.uniforms.uRes = U.uRes;
-    sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nvarying float vCutDepth;')
-      .replace('#include <project_vertex>', '#include <project_vertex>\nvCutDepth = - mvPosition.z;');
-    sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying float vCutDepth;\nuniform vec3 uCut;\nuniform vec2 uRes;')
-      .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
+    let vs = sh.vertexShader, fs = sh.fragmentShader;
+    if (light) fs = fs.replace('#include <fog_fragment>', FOG_TO_BLACK);
+    if (clock) {
+      sh.uniforms.uFlick = clock;
+      vs = vs.replace('#include <common>', '#include <common>\nattribute float flick;\nuniform float uFlick;\nvarying float vFlick;')
+        .replace('#include <project_vertex>', '#include <project_vertex>\n' + FLICKER);
+      fs = fs.replace('#include <common>', '#include <common>\nvarying float vFlick;')
+        .replace('#include <color_fragment>', '#include <color_fragment>\ndiffuseColor.rgb *= vFlick;');
+    }
+    if (U) {
+      sh.uniforms.uCut = U.uCut; sh.uniforms.uRes = U.uRes;
+      vs = vs.replace('#include <common>', '#include <common>\nvarying float vCutDepth;')
+        .replace('#include <project_vertex>', '#include <project_vertex>\nvCutDepth = - mvPosition.z;');
+      fs = fs.replace('#include <common>', '#include <common>\nvarying float vCutDepth;\nuniform vec3 uCut;\nuniform vec2 uRes;')
+        .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
         {
           vec2 spC = gl_FragCoord.xy / uRes;
           float cdC = length( ( spC - uCut.xy ) * vec2( uRes.x / uRes.y, 1.0 ) );
@@ -413,8 +431,10 @@ function tweak(mat, U, light) {
             if ( cdC < 0.105 || mod( floor( gl_FragCoord.x ) + floor( gl_FragCoord.y ), 2.0 ) < 0.5 ) discard;
           }
         }`);
+    }
+    sh.vertexShader = vs; sh.fragmentShader = fs;
   };
-  mat.customProgramCacheKey = () => 'dressing' + (U ? 'Cut' : '') + (light ? 'Light' : '');
+  mat.customProgramCacheKey = () => 'dressing' + (U ? 'Cut' : '') + (light ? 'Light' : '') + (clock ? 'Flicker' : '');
   return mat;
 }
 
@@ -424,8 +444,6 @@ function ownHash(i, j) {
   n = Math.imul(n ^ (n >>> 13), 1274126177);
   return ((n ^ (n >>> 16)) >>> 0) / 4294967296;
 }
-// 0..1 from an integer, for the flicker; no allocations
-const noise = n => { const s = Math.sin(n * 127.1) * 43758.5453; return s - Math.floor(s); };
 
 // ---------------------------------------------------------------- choosing where things go (no rendering)
 // Picks the hoardings and shop signs for a world. Returns plain records; nothing here touches three.js.
@@ -521,11 +539,11 @@ function planSigns(W, rnd) {
     const y0 = SIGN_Y + rnd(f.kx, f.kz, 6) * Math.max(0, Math.min(0.14, f.h - ROOF_GAP - h - SIGN_Y));
     if (tint < 0 || rnd(f.kx, f.kz, 7) < 0.25) tint = pickNeon(rnd(f.kx, f.kz, 8));
     parts.forEach((p, k) => { p.tint = tint; p.w = p.cell.w * h / ROW; if (k === 1 && rnd(f.kx, f.kz, 9) < 0.3) p.tint = (tint + 1 + Math.floor(rnd(f.kx, f.kz, 10) * (NEON.length - 1))) % NEON.length; });
-    signs.push({ f, parts, text, tint, w, h, y0, y1: y0 + h, flicker: 0 });
+    signs.push({ f, parts, text, tint, w, h, y0, y1: y0 + h, flicker: 0, phase: 0 });
   }
-  // one in ten flickers, shared out between the two flicker groups
+  // one in ten flickers, each to its own rhythm (phase 0..1; the upper half also black out for a moment)
   signs.map(s => ({ s, key: rnd(s.f.kx, s.f.kz, 11) })).sort((a, b) => a.key - b.key || a.s.f.i - b.s.f.i)
-    .slice(0, Math.round(signs.length * FLICKER_SHARE)).forEach((o, k) => { o.s.flicker = 1 + k % 2; });
+    .slice(0, Math.round(signs.length * FLICKER_SHARE)).forEach((o, k, all) => { o.s.flicker = 1; o.s.phase = (k + 0.5) / all.length; });
   return { signs, hoardings };
 }
 
@@ -596,20 +614,21 @@ export function buildDressing(scene, W, ctx) {
   const own = [];                      // geometries, materials and instanced meshes made here
   const stats = { signs: 0, flickering: 0, hoardings: 0, glowQuads: 0, tanks: 0, stairHeads: 0, aerials: 0, roofInstances: 0, drawCalls: 0, textureBytes: 0, devanagari: false, cellsLeftOut: 0 };
   const debug = { signs: [], hoardings: [], roof: [], atlas: layout() };
-  let atlas = null, roofShapes = null, flickA = null, flickB = null, gone = false;
+  const clock = { value: 0 };          // seconds, read by the flicker shader
+  let atlas = null, roofShapes = null, gone = false;
   const keep = x => { own.push(x); return x; };
-  const addMesh = (geo, mat, order) => { const m = new THREE.Mesh(keep(geo), mat); m.frustumCulled = false; m.renderOrder = order; group.add(m); stats.drawCalls++; return m; };
+  const addMesh = (geo, mat, order) => { const m = new THREE.Mesh(keep(geo), keep(mat)); m.frustumCulled = false; m.renderOrder = order; group.add(m); stats.drawCalls++; return m; };
 
   // ---- shop signs, hoardings and their light
   function signs() {
     const plan = planSigns(W, rnd), L = layout();
     stats.cellsLeftOut = L.missing;
-    for (const s of plan.signs) debug.signs.push({ text: s.text, x: s.f.x, z: s.f.z, nx: s.f.nx, nz: s.f.nz, w: s.w, h: s.h, y0: s.y0, y1: s.y1, off: s.flicker ? OFF_LIT : OFF_BOARD, flicker: s.flicker, district: s.f.district, wallH: s.f.h, wallLen: s.f.len });
+    for (const s of plan.signs) debug.signs.push({ text: s.text, x: s.f.x, z: s.f.z, nx: s.f.nx, nz: s.f.nz, w: s.w, h: s.h, y0: s.y0, y1: s.y1, off: s.flicker ? OFF_LIT : OFF_BOARD, flicker: s.flicker, phase: s.phase, district: s.f.district, wallH: s.f.h, wallLen: s.f.len });
     for (const hb of plan.hoardings) debug.hoardings.push({ text: hb.art.art.name, x: hb.f.x, z: hb.f.z, nx: hb.f.nx, nz: hb.f.nz, w: hb.w, h: hb.h, y0: hb.y0, y1: hb.y1, off: OFF_HOARD, district: hb.f.district, wallH: hb.f.h, wallLen: hb.f.len });
     atlas = takeAtlas();
     if (!atlas) return;                // no canvas here (or no 2D context): the town simply goes without boards
     stats.devanagari = atlas.deva; stats.textureBytes = ATLAS_W * ATLAS_H * 4;
-    const boards = new Quads(), glow = new Quads(), lit = [null, new Quads(), new Quads()];
+    const boards = new Quads(), glow = new Quads(), lit = new Quads();   // lit: the tubes (and glow) of the flickering signs
     const uvGlow = uvOf(L.glow), uvWhite = uvOf(L.white), wu = (uvWhite[0] + uvWhite[2]) / 2, wv = (uvWhite[1] + uvWhite[3]) / 2, uvDot = [wu, wv, wu, wv];
     // light on the wall around a board and on the road under it, kept inside the board's own stretch of wall
     const spill = (Q, f, w, y0, y1, rgb) => {
@@ -619,8 +638,9 @@ export function buildDressing(scene, W, ctx) {
       stats.glowQuads += 2;
     };
     for (const s of plan.signs) {
-      const f = s.f, Q = s.flicker ? lit[s.flicker] : boards;
+      const f = s.f, Q = s.flicker ? lit : boards;
       let x = -s.w / 2;
+      lit.phase = s.phase;
       for (const p of s.parts) {
         const uv = uvOf(p.cell.rect), col = NEON[p.tint].lit;
         if (s.flicker) wallQuad(boards, f, x, x + p.w, s.y0, s.y1, OFF_BOARD, uv, scaled(col, OFF_LEVEL));   // the dead tubes stay faintly visible
@@ -638,12 +658,10 @@ export function buildDressing(scene, W, ctx) {
       stats.hoardings++;
     }
     const base = { map: atlas.tex, vertexColors: true };
-    const light = { transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 };
-    const lightMat = () => tweak(keep(new THREE.MeshBasicMaterial(Object.assign({}, base, light))), U, true);
-    if (boards.n) addMesh(boards.build(), tweak(keep(new THREE.MeshBasicMaterial(base)), U, false), 0);
-    if (glow.n) addMesh(glow.build(), lightMat(), 2);
-    if (lit[1].n) addMesh(lit[1].build(), flickA = lightMat(), 3);
-    if (lit[2].n) addMesh(lit[2].build(), flickB = lightMat(), 3);
+    const light = { map: atlas.tex, vertexColors: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 };
+    if (boards.n) addMesh(boards.build(false), tweak(new THREE.MeshBasicMaterial(base), { U }), 0);
+    if (glow.n) addMesh(glow.build(false), tweak(new THREE.MeshBasicMaterial(light), { U, light: true }), 2);
+    if (lit.n) addMesh(lit.build(true), tweak(new THREE.MeshBasicMaterial(light), { U, light: true, clock }), 3);
   }
 
   // ---- rooftop clutter
@@ -651,7 +669,7 @@ export function buildDressing(scene, W, ctx) {
     const plan = planRoofs(W, rnd);
     if (!plan.tanks.length && !plan.stairs.length && !plan.aerials.length) return;
     roofShapes = takeRoofShapes();
-    const mat = tweak(keep(new THREE.MeshLambertMaterial({ color: 0xffffff })), U, false);
+    const mat = tweak(keep(new THREE.MeshLambertMaterial({ color: 0xffffff })), { U });
     const instanced = (geo, count) => { const im = keep(new THREE.InstancedMesh(geo, mat, count)); im.frustumCulled = false; group.add(im); stats.drawCalls++; stats.roofInstances += count; return im; };
     const put = (im, k, x, y, z, sx, sy, sz, ry, hex, dim) => {
       _dummy.position.set(x, y, z); _dummy.scale.set(sx, sy, sz); _dummy.rotation.set(0, ry, 0); _dummy.updateMatrix();
@@ -689,17 +707,11 @@ export function buildDressing(scene, W, ctx) {
   try { roofs(); } catch (e) { console.warn('dressing: rooftop clutter left out', e); }
   if (scene && typeof scene.add === 'function') scene.add(group);
 
-  // Flickers the failing signs. time is in seconds; dt is not needed. Allocates nothing.
+  // Flickers the failing signs: all it does is hand the time (seconds) to their shader. dt is not needed.
+  // The clock wraps every 1000 s so the shader's arithmetic stays exact on phones. Allocates nothing.
   function update(dt, time) {
-    const t = typeof time === 'number' ? time : 0;
-    if (flickA) {   // a nervous tube: steady, then a burst of stutter every four seconds or so
-      const ph = t * 0.23 - Math.floor(t * 0.23);
-      flickA.color.setScalar(ph > 0.26 ? 1 : (noise(Math.floor(t * 19)) > 0.42 ? 1 : 0));
-    }
-    if (flickB) {   // a dying tube: goes out for a moment, struggles back, then holds
-      const ph = (t * 0.151 + 0.4) - Math.floor(t * 0.151 + 0.4);
-      flickB.color.setScalar(ph < 0.1 ? 0 : ph < 0.3 ? (noise(Math.floor(t * 13) + 71) > 0.5 ? 0.9 : 0.08) : 0.92 + 0.08 * Math.sin(t * 47));
-    }
+    const t = typeof time === 'number' && isFinite(time) ? time : 0;
+    clock.value = t - 1000 * Math.floor(t / 1000);
   }
 
   // Takes everything out of the scene and frees it (the shared atlas and roof shapes go with the last user).
@@ -711,7 +723,7 @@ export function buildDressing(scene, W, ctx) {
     own.length = 0; group.clear();
     if (atlas) dropAtlas();
     if (roofShapes) dropRoofShapes();
-    atlas = roofShapes = flickA = flickB = null;
+    atlas = roofShapes = null;
   }
 
   return { update, dispose, stats, debug, group };

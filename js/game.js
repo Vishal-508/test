@@ -1,15 +1,15 @@
 // Chor Police: Jugnupur ki Raat. A night car chase: game rules, police AI, multiplayer sync, input, camera, HUD and the main loop.
 import * as THREE from '../vendor/three.module.min.js';
-import { CFG, matchSetup, rankFor, paintsUnlocked } from './config.js';
-import { buildWorld, hash2, LANE } from './world.js';
-import { buildScene, paintMini, setSiteVisual, COLORS, LABELS, makeLabel } from './scene.js';
-import { makeVehicle, stepVehicle, makeDriver, drive, CAR } from './vehicle.js';
-import { makeCar, PAINTS } from './cars.js';
-import { Fx } from './fx.js';
-import { buildDressing } from './dressing.js';
-import { makePost } from './postfx.js';
-import { initAudio, setMuted, isMuted, setMusicOn, isMusicOn, engine, skid, siren, heartbeat, rain, music, sfx } from './audio.js';
-import { HostNet, ClientNet, cleanCode } from './net.js';
+import { CFG, matchSetup, rankFor, paintsUnlocked } from './config.js?v=2';
+import { buildWorld, hash2, LANE } from './world.js?v=2';
+import { buildScene, paintMini, setSiteVisual, COLORS, LABELS, makeLabel } from './scene.js?v=2';
+import { makeVehicle, stepVehicle, makeDriver, drive, CAR } from './vehicle.js?v=2';
+import { makeCar, PAINTS } from './cars.js?v=2';
+import { Fx } from './fx.js?v=2';
+import { buildDressing } from './dressing.js?v=2';
+import { makePost } from './postfx.js?v=2';
+import { initAudio, setMuted, isMuted, setMusicOn, isMusicOn, engine, skid, siren, heartbeat, rain, music, sfx } from './audio.js?v=2';
+import { HostNet, ClientNet, cleanCode } from './net.js?v=2';
 
 const $ = id => document.getElementById(id);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));

@@ -256,7 +256,7 @@ window.__pv = {
     return b.text;
   },
   // face the i-th flickering sign
-  faceFlicker(i, dist) { const list = dressing.debug.signs.map((s, k) => (s.flicker ? k : -1)).filter(k => k >= 0); return this.faceBoard('sign', list[i % list.length], dist) + ' (group ' + dressing.debug.signs[list[i % list.length]].flicker + ')'; },
+  faceFlicker(i, dist) { const list = dressing.debug.signs.map((s, k) => (s.flicker ? k : -1)).filter(k => k >= 0); return this.faceBoard('sign', list[i % list.length], dist) + ' (phase ' + dressing.debug.signs[list[i % list.length]].phase.toFixed(2) + ')'; },
   // put the car on the road behind a building that has a water tank, and the camera on the far side, so the
   // building and its tank stand between them: with cut=1 both must open up round the car
   behindTank(i) {
@@ -268,7 +268,20 @@ window.__pv = {
     return { tanks: tanks.length, box: { x: b.x, y: b.y, w: b.w, d: b.d, h: b.h } };
   },
   atlasDataUrl() { const tex = dressing && dressing.group.children[0] && dressing.group.children[0].material.map; return tex ? tex.image.toDataURL('image/png') : null; },
-  flickerLevels(t) { dressing.update(0.016, t); return dressing.group.children.filter(m => !m.isInstancedMesh && m.renderOrder === 3).map(m => +m.material.color.r.toFixed(2)); },
+  // how bright the i-th flickering sign is at each of the given times (mean of the middle of a plain render, 0..255)
+  flickerProbe(i, times) {
+    const name = this.faceFlicker(i, 1.6), cv = document.createElement('canvas'); cv.width = 220; cv.height = 110;
+    const c = cv.getContext('2d', { willReadFrequently: true }), out = [];
+    state.auto = false;
+    for (const t of times) {
+      dressing.update(0.016, t); placeCamera(); renderer.render(scene, camera);
+      c.drawImage(renderer.domElement, (innerWidth - 220) / 2, (innerHeight - 110) / 2, 220, 110, 0, 0, 220, 110);
+      const d = c.getImageData(0, 0, 220, 110).data; let sum = 0;
+      for (let k = 0; k < d.length; k += 4) sum += d[k] + d[k + 1] + d[k + 2];
+      out.push(Math.round(sum / (d.length / 4) / 3));
+    }
+    return { name, levels: out };
+  },
   // builds and disposes a second copy, to see that nothing is left behind
   disposeTest() {
     const before = { geometries: renderer.info.memory.geometries, textures: renderer.info.memory.textures, children: scene.children.length };

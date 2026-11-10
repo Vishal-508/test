@@ -83,6 +83,7 @@ another network or Wi-Fi.
 | `data/map.json` | the town of Jugnupur: roads, places to rob, hiding spots, hand-off points |
 | `vendor/` | [three.js](https://threejs.org) r160 (with its post-processing add-ons) and [PeerJS](https://peerjs.com) 1.5.4, both MIT licensed |
 | `tools/check-world.mjs` | `node tools/check-world.mjs` checks every place on the map can be driven to |
+| `tools/stamp.mjs` | `node tools/stamp.mjs 3` after changing the game's code, so browsers fetch the new files together |
 | `tools/preview-*.html` | stand-alone viewers for the cars, hideouts, effects, sounds and signs |
 
 ## Not built

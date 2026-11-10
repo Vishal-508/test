@@ -3,7 +3,7 @@
 // the light pools, shadow, livery and reflections). Geometry and textures are built once and shared
 // by every car of a kind; each car owns only its materials and its four wheel instances.
 //
-//   import { PAINTS, makeCar } from './cars.js';
+//   import { PAINTS, makeCar } from './cars.js?v=2';
 //   const car = makeCar('chor', { paint: PAINTS[0].hex });      // or makeCar('police')
 //   scene.add(car.g); car.g.position.set(x, 0, z); car.g.rotation.y = heading;
 //   car.update(state, dt, time);                                 // every frame, seconds
@@ -515,7 +515,7 @@ function sheenShader(shader) {
 }
 // Work out a paint material's sheen from its colour.
 function setSheen(mat) {
-  const c = mat.color, m = Math.max(c.r, c.g, c.b), k = SHEEN_HUE * (1 - smooth(0.04, 0.45, m)) / (m + 0.03);
+  const c = mat.color, m = Math.max(c.r, c.g, c.b), k = SHEEN_HUE * (1 - smooth(0.03, 0.2, m)) / (m + 0.03);
   mat.emissive.setRGB(SHEEN_SKY.r + c.r * k, SHEEN_SKY.g + c.g * k, SHEEN_SKY.b + c.b * k);
 }
 
