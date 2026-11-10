@@ -48,7 +48,7 @@ export function makeChar(role, variant = 0, name = '') {
   ring.rotation.x = -Math.PI / 2; ring.position.y = 0.016; ring.visible = false; g.add(ring);
   let label = null;
   if (name) { label = makeLabel(name, { color: isChor ? '#ffd98a' : '#9dbcff', h: 0.34 }); label.position.y = 1.15; g.add(label); }
-  body.scale.setScalar(1.05);
+  body.scale.setScalar(1.18);
   return { g, body, parts, ring, label, role, phase: Math.random() * 6, alpha: 1 };
 }
 

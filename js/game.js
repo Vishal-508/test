@@ -59,7 +59,7 @@ const S = {
   lobby: { code: '', players: [] }, night: 1,
   players: new Map(), cops: [], sites: [], me: null,
   t: 0, banked: 0, target: 700, over: null, leverLock: 0, cfg: null, flags: {}, evOut: [], pings: [],
-  cam: { yaw: 0, dist: 7.6, pitch: 1.02, orbit: 0 },
+  cam: { yaw: 0, dist: 8.8, pitch: 1.02, orbit: 0 },
   hold: { key: '', t: 0 }, latch: false, robSent: -1, unhideSent: false, ctx: null, danger: 0, lastSnap: 0, lastSend: 0, tickSfx: 0,
 };
 const In = { keys: new Set(), mx: 0, my: 0, actTouch: false, runTouch: false, stick: null, look: null };
@@ -546,7 +546,7 @@ function syncEntities(dt, time) {
     P.seen = vis; P.char.g.visible = vis;
     P.char.g.position.set(P.rx, 0, P.ry); P.char.g.rotation.y = P.ra;
     setCharAlpha(P.char, alpha); setCarry(P.char, P.carry.length, P.carry.some(isJackpot));
-    P.char.body.scale.y = (P.hidden >= 0 ? 0.62 : 1) * 1.05;
+    P.char.body.scale.y = (P.hidden >= 0 ? 0.62 : 1) * 1.18;
     animateChar(P.char, (P.jailed || P.hidden >= 0) ? 0 : P.spd, dt, time);
   }
   for (const c of S.cops) {
@@ -636,11 +636,24 @@ function updateHud(time) {
     $('promptBar').style.width = clamp(frac * 100, 0, 100) + '%';
   } else pr.hidden = true;
   // being chased: red edges and a siren that grows as they close in
-  let danger = 0;
+  let danger = 0, chaser = null;
   if (me.role === 'chor' && !me.jailed && S.screen === 'play') {
-    for (const c of S.cops) if (c.st === 'chase' && c.target === me.id) danger = Math.max(danger, clamp(1 - dist(c, me) / 16, 0.3, 1));
-    if (me.hidden < 0) for (const P of S.players.values()) if (P.role === 'police' && dist(P, me) < 7 && W.los(P.x, P.y, me.x, me.y)) danger = Math.max(danger, clamp(1 - dist(P, me) / 9, 0.3, 1));
+    for (const c of S.cops) if (c.st === 'chase' && c.target === me.id) { const v = clamp(1 - dist(c, me) / 16, 0.3, 1); if (v > danger) { danger = v; chaser = { x: c.rx, y: c.ry }; } }
+    if (me.hidden < 0) for (const P of S.players.values()) if (P.role === 'police' && dist(P, me) < 9 && W.los(P.x, P.y, me.x, me.y)) { const v = clamp(1 - dist(P, me) / 11, 0.3, 1); if (v > danger) { danger = v; chaser = { x: P.rx, y: P.ry }; } }
   }
+  // if the one chasing you is outside the picture, a red arrow on the edge of the screen shows where from
+  const th = $('threat');
+  if (chaser) {
+    v3.set(chaser.x, 0.5, chaser.y).project(camera);
+    if (v3.z < 1 && Math.abs(v3.x) < 0.93 && Math.abs(v3.y) < 0.88) th.style.display = 'none';
+    else {
+      const dx = chaser.x - me.x, dy = chaser.y - me.y, cy = Math.cos(S.cam.yaw), sy = Math.sin(S.cam.yaw);
+      const ang = Math.atan2(dx * sy - dy * cy, dx * cy + dy * sy);
+      th.style.display = 'block';
+      th.style.left = (50 + Math.cos(ang) * 43) + '%'; th.style.top = (50 - Math.sin(ang) * 39) + '%';
+      th.style.transform = 'translate(-50%,-50%) rotate(' + (90 - ang * 180 / Math.PI).toFixed(0) + 'deg)';
+    }
+  } else th.style.display = 'none';
   S.danger += (danger - S.danger) * 0.15;
   $('vignette').style.opacity = S.danger > 0.02 ? (S.danger * (0.72 + 0.28 * Math.sin(time * 9))).toFixed(2) : 0;
   setSiren(S.danger);
