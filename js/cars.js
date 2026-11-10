@@ -3,7 +3,7 @@
 // the light pools, shadow, livery and reflections). Geometry and textures are built once and shared
 // by every car of a kind; each car owns only its materials and its four wheel instances.
 //
-//   import { PAINTS, makeCar } from './cars.js?v=3';
+//   import { PAINTS, makeCar } from './cars.js?v=4';
 //   const car = makeCar('chor', { paint: PAINTS[0].hex });      // or makeCar('police')
 //   scene.add(car.g); car.g.position.set(x, 0, z); car.g.rotation.y = heading;
 //   car.update(state, dt, time);                                 // every frame, seconds

@@ -1,15 +1,15 @@
 // Chor Police: Jugnupur ki Raat. A night car chase: game rules, police AI, multiplayer sync, input, camera, HUD and the main loop.
 import * as THREE from '../vendor/three.module.min.js';
-import { CFG, matchSetup, rankFor, paintsUnlocked } from './config.js?v=3';
-import { buildWorld, hash2, LANE } from './world.js?v=3';
-import { buildScene, paintMini, setSiteVisual, COLORS, LABELS, makeLabel } from './scene.js?v=3';
-import { makeVehicle, stepVehicle, makeDriver, drive, CAR } from './vehicle.js?v=3';
-import { makeCar, PAINTS } from './cars.js?v=3';
-import { Fx } from './fx.js?v=3';
-import { buildDressing } from './dressing.js?v=3';
-import { makePost } from './postfx.js?v=3';
-import { initAudio, setMuted, isMuted, setMusicOn, isMusicOn, engine, skid, siren, heartbeat, rain, music, sfx } from './audio.js?v=3';
-import { HostNet, ClientNet, cleanCode } from './net.js?v=3';
+import { CFG, matchSetup, rankFor, paintsUnlocked } from './config.js?v=4';
+import { buildWorld, hash2, LANE } from './world.js?v=4';
+import { buildScene, paintMini, setSiteVisual, COLORS, LABELS, makeLabel } from './scene.js?v=4';
+import { makeVehicle, stepVehicle, makeDriver, drive, CAR } from './vehicle.js?v=4';
+import { makeCar, PAINTS } from './cars.js?v=4';
+import { Fx } from './fx.js?v=4';
+import { buildDressing } from './dressing.js?v=4';
+import { makePost } from './postfx.js?v=4';
+import { initAudio, setMuted, isMuted, setMusicOn, isMusicOn, engine, skid, siren, heartbeat, rain, music, sfx } from './audio.js?v=4';
+import { HostNet, ClientNet, cleanCode } from './net.js?v=4';
 
 const $ = id => document.getElementById(id);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -1138,7 +1138,7 @@ async function createRoom() {
       else if (m.k === 'p') {
         const P = S.players.get(pid); if (!P || P.jailed || !(m.q >= P.tpSeq) || S.screen !== 'play') return;
         if (typeof m.x !== 'number' || typeof m.y !== 'number' || !isFinite(m.x) || !isFinite(m.y)) return;
-        const n = P.net; n.x = clamp(m.x, 0, 100); n.y = clamp(m.y, 0, 100); n.a = (+m.a || 0) % TAU; n.vf = clamp(+m.v || 0, -3, 6); n.steer = clamp(+m.s || 0, -1, 1); n.t = performance.now();
+        const n = P.net; n.x = clamp(m.x, 0, 100); n.y = clamp(m.y, 0, 100); n.a = Number.isFinite(+m.a) ? +m.a % TAU : 0; n.vf = clamp(+m.v || 0, -3, 6); n.steer = clamp(+m.s || 0, -1, 1); n.t = performance.now();
         P.nitroOn = !!(m.f & 1); P.lights = !!(m.f & 2); P.brake = !!(m.f & 4); P.drift = !!(m.f & 8); if (m.f & 16) P.crashT = 0.8;
       } else if (m.k === 'a') doAction(S.players.get(pid), String(m.t), m.i);
     },
