@@ -24,6 +24,12 @@ const RAIN_MAX = 2100, SPLASH_MAX = 280;       // streaks and splash rings at le
 const RAIN_BOX = 26, RAIN_HEIGHT = 9, SPLASH_AREA = 20;
 const GRAVITY = 6;                             // for sparks, units / s^2 (exaggerated so the arcs read at chase-camera distance)
 const REBASE = 2048;                           // the internal clock wraps here so shader floats stay precise for hours
+// Draw order among the see-through things in the scene (three.js sorts transparent objects by renderOrder first).
+// The two layers that lie flat on the road go early: after the cars' own ground shadow and light pools (-3, -2) but
+// before anything that stands on the ground and does not write depth, above all the hideout doors (0), so that from
+// inside a hideout the marks and splashes outside are covered by the door planks instead of being painted over them.
+// The layers in the air go late, over lamp cones (3) and under labels (20).
+const ORDER_SKID = -1.6, ORDER_SPLASH = -1.5, ORDER_SMOKE = 6, ORDER_SPARKS = 7, ORDER_RAIN = 8;
 
 // ---------------------------------------------------------------------------------------------------------- shaders
 // alpha-style fog for things that should thin out with distance rather than turn fog-coloured
@@ -446,14 +452,14 @@ export class Fx {
       this._trails = new Float64Array(TRAILS * TRAIL_STRIDE);
       const mat = material(SKID_VS, SKID_FS, { uTime, uFade: { value: SKID_FADE }, uColor: { value: SKID_RGB.clone() } }, false);
       mat.polygonOffset = true; mat.polygonOffsetFactor = -1; mat.polygonOffsetUnits = -2;
-      this._skidMesh = add(geo, mat, 1, 'fx-skid');
+      this._skidMesh = add(geo, mat, ORDER_SKID, 'fx-skid');
     }
 
     // ---- rain splashes on the road
     {
       const geo = weatherGeometry(SPLASH_MAX, (k, axis) => (axis ? (k >> 1) : (k & 1)) * 2 - 1);
       this._splashU = { uTime, uFlash, uCenter, uArea: { value: SPLASH_AREA }, uY: { value: 0.018 }, uAlpha: { value: 0 }, uColor: { value: SPLASH_RGB.clone() } };
-      this._splashMesh = add(geo, material(SPLASH_VS, SPLASH_FS, this._splashU, false), 2, 'fx-splash');
+      this._splashMesh = add(geo, material(SPLASH_VS, SPLASH_FS, this._splashU, false), ORDER_SPLASH, 'fx-splash');
     }
 
     // ---- smoke and dust
@@ -463,7 +469,7 @@ export class Fx {
       this._smokeHead = 0; this._smokeUntil = -1;
       this._smokeU = { uTime, uFlash, uWind: { value: new THREE.Vector2(0.14, 0.06) }, uMap: { value: getPuffTexture() } };
       puffUsers++;
-      this._smokeMesh = add(p.geo, material(SMOKE_VS, SMOKE_FS, this._smokeU, false), 6, 'fx-smoke');
+      this._smokeMesh = add(p.geo, material(SMOKE_VS, SMOKE_FS, this._smokeU, false), ORDER_SMOKE, 'fx-smoke');
     }
 
     // ---- sparks, crash flashes and backfire flames (the only additive layer)
@@ -471,7 +477,7 @@ export class Fx {
       const p = poolGeometry(SPARK_CAP, SPARK_STRIDE, ['aPos', 'aVel', 'aMisc']);
       this._sparkArr = p.array; this._sparkBuf = p.buf; this._sparkRange = { start: 0, count: 0 };
       this._sparkHead = 0; this._sparkUntil = -1;
-      this._sparkMesh = add(p.geo, material(SPARK_VS, SPARK_FS, { uTime }, true), 7, 'fx-sparks');
+      this._sparkMesh = add(p.geo, material(SPARK_VS, SPARK_FS, { uTime }, true), ORDER_SPARKS, 'fx-sparks');
     }
 
     // ---- rain streaks
@@ -481,7 +487,7 @@ export class Fx {
         uTime, uFlash, uCenter, uBox: { value: new THREE.Vector3(RAIN_BOX, RAIN_HEIGHT, RAIN_BOX) }, uFall: { value: new THREE.Vector3(4.4, -17, 1.9) },
         uLen: { value: 0.95 }, uWidth: { value: 0.01 }, uAlpha: { value: 0 }, uColor: { value: RAIN_RGB.clone() },
       };
-      this._rainMesh = add(geo, material(RAIN_VS, RAIN_FS, this._rainU, false), 8, 'fx-rain');
+      this._rainMesh = add(geo, material(RAIN_VS, RAIN_FS, this._rainU, false), ORDER_RAIN, 'fx-rain');
     }
 
     if (scene) scene.add(group);
