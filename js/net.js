@@ -61,18 +61,22 @@ export class ClientNet {
       const fail = msg => { if (done) return; done = true; clearTimeout(timer); this.close(); reject(new Error(msg)); };
       const timer = setTimeout(() => fail('Could not reach that room. Check the code and your internet.'), 20000);
       const peer = this.peer = new P(peerOptions());
+      let retries = 2;   // the host's link to the matchmaking service can drop for a moment: ask again before giving up
+      const dial = () => {
+        const conn = this.conn = peer.connect(PREFIX + code, { reliable: true, serialization: 'json' });
+        conn.on('open', () => { if (done || this.conn !== conn) return; done = true; clearTimeout(timer); resolve(); });
+        conn.on('data', d => { if (this.conn === conn) this.h.onData && this.h.onData(d); });
+        conn.on('close', () => { if (!this.closed && done && this.conn === conn) this.h.onClose && this.h.onClose(); });
+        conn.on('error', () => { if (!done && this.conn === conn && retries <= 0) fail('Could not connect to the room.'); });
+      };
       peer.on('error', err => {
-        if (!done) fail(err && err.type === 'peer-unavailable' ? 'No room with that code. Ask your friend for the code again.' : 'Could not connect (' + ((err && err.type) || 'network error') + ').');
-        else console.warn('client peer error', err && err.type);
+        if (done) { console.warn('client peer error', err && err.type); return; }
+        if (err && err.type === 'peer-unavailable' && retries-- > 0) { setTimeout(() => { if (!done && !this.closed) dial(); }, 2500); return; }
+        fail(err && err.type === 'peer-unavailable' ? 'No room with that code. Ask your friend for the code again.' : 'Could not connect (' + ((err && err.type) || 'network error') + ').');
       });
       peer.on('disconnected', () => { if (!this.closed) { try { peer.reconnect(); } catch (e) {} } });
-      peer.on('open', () => {
-        const conn = this.conn = peer.connect(PREFIX + code, { reliable: true, serialization: 'json' });
-        conn.on('open', () => { if (done) return; done = true; clearTimeout(timer); resolve(); });
-        conn.on('data', d => this.h.onData && this.h.onData(d));
-        conn.on('close', () => { if (!this.closed) this.h.onClose && this.h.onClose(); });
-        conn.on('error', () => { if (!done) fail('Could not connect to the room.'); });
-      });
+      let dialled = false;
+      peer.on('open', () => { if (!dialled) { dialled = true; dial(); } });   // 'open' fires again after a reconnect to the service: do not dial twice
     });
   }
   send(msg) { if (this.conn && this.conn.open) { try { this.conn.send(msg); } catch (e) {} } }
