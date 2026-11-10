@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>Chor Police: Jugnupur ki Raat</title>
-<meta name="description" content="A 3D chor-police game. Rob the night town of Jugnupur, hide from the police, and play with friends using a room code.">
+<meta name="description" content="A 3D night car-chase game. Drive the getaway car through Jugnupur, rob the town, lose the police jeeps, hide in garages, and play with friends using a room code.">
 <meta name="theme-color" content="#0a0f1d">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230a0f1d'/%3E%3Ccircle cx='16' cy='16' r='9' fill='%23f3b43f'/%3E%3Crect x='7' y='13' width='18' height='5' fill='%23111318'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -67,7 +67,23 @@ kbd{font-family:ui-monospace,Menlo,monospace;font-size:.82em;background:#1b2540;
 #role.chor{color:var(--loot);border-color:rgba(243,180,63,.6)} #role.police{color:var(--police);border-color:rgba(106,152,255,.6)}
 #left{display:flex;flex-direction:column;gap:6px;align-items:flex-start;min-width:0}
 #bag{font-size:.9rem;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:3px 10px}
-#stam{width:110px;height:6px;background:rgba(255,255,255,.12);border-radius:4px;overflow:hidden} #stam i{display:block;height:100%;width:100%;background:#7de0ff;border-radius:4px}
+.rowpill{display:flex;gap:6px;align-items:center}
+#wanted{color:var(--danger);letter-spacing:.12em;font-size:.95rem;min-width:92px;text-align:center} #wanted .off{color:rgba(255,255,255,.22)}
+#dash{position:absolute;left:calc(14px + var(--sal));bottom:calc(52px + var(--sab));display:flex;flex-direction:column;gap:5px;align-items:flex-start}
+#speed{font-family:var(--display);line-height:1;text-shadow:0 2px 8px #000} #speed b{font-size:2.6rem;font-weight:800;font-variant-numeric:tabular-nums} #speed span{font-size:.85rem;color:var(--muted);margin-left:5px}
+#nitro{width:150px;height:8px;background:rgba(255,255,255,.14);border-radius:5px;overflow:hidden} #nitro i{display:block;height:100%;width:100%;background:linear-gradient(90deg,#3bd0ff,#b6f3ff);border-radius:5px}
+#lamp{font-size:.72rem;letter-spacing:.08em;color:#ffe9a8;text-shadow:0 1px 4px #000} #lamp.off{color:rgba(255,255,255,.35)}
+#bust{position:absolute;top:36%;left:50%;transform:translateX(-50%);width:min(60vw,300px);text-align:center}
+#bustText{font-family:var(--display);font-weight:800;color:var(--danger);letter-spacing:.2em;text-shadow:0 2px 8px #000}
+#bust .bar{height:12px;border:1px solid rgba(255,90,90,.7);background:rgba(40,0,0,.5)} #bust .bar i{background:linear-gradient(90deg,#ff8a3a,#ff2a2a);transition:none}
+#hideui{position:absolute;inset:0;opacity:0;transition:opacity .4s;pointer-events:none}
+#hideui.on{opacity:1}
+#hideui .lb{position:absolute;left:0;right:0;height:9vh;background:#000} #hideui .top{top:0} #hideui .bot{bottom:0}
+#hideText{position:absolute;top:calc(9vh + 14px);left:50%;transform:translateX(-50%);font-family:var(--display);letter-spacing:.14em;color:#cfd6ea;text-shadow:0 2px 6px #000;white-space:nowrap}
+#hideMeter{position:absolute;top:calc(9vh + 46px);left:50%;transform:translateX(-50%);width:min(50vw,240px);height:6px;background:rgba(255,255,255,.12);border-radius:4px;overflow:hidden} #hideMeter i{display:block;height:100%;width:0;background:var(--danger)}
+#paints{display:flex;gap:7px;flex-wrap:wrap} #paints button{width:30px;height:30px;border-radius:50%;padding:0;border:2px solid rgba(255,255,255,.25)} #paints button.sel{border-color:var(--loot);box-shadow:0 0 0 3px rgba(243,180,63,.35)} #paints button.locked{opacity:.3;cursor:not-allowed}
+#paintName{color:var(--fg);text-transform:none;letter-spacing:0;margin-left:6px}
+.opts button{font-size:.9rem;padding:.45em .8em}
 #timer{font-family:var(--display);font-weight:800;font-size:1.9rem;line-height:1;text-shadow:0 2px 8px #000;font-variant-numeric:tabular-nums}
 #timer.low{color:var(--danger)}
 #phase{font-size:.8rem;color:var(--muted);text-align:center;text-shadow:0 1px 4px #000}
@@ -82,7 +98,7 @@ kbd{font-family:ui-monospace,Menlo,monospace;font-size:.82em;background:#1b2540;
 #banner.on{opacity:1} #banner.red{color:var(--danger)} #banner.gold{color:var(--loot)} #banner.green{color:var(--escape)} #banner.blue{color:var(--police)}
 #threat{position:absolute;display:none;width:0;height:0;border-left:15px solid transparent;border-right:15px solid transparent;border-bottom:30px solid var(--danger);filter:drop-shadow(0 0 8px rgba(255,60,60,.9));animation:pulse .5s ease-in-out infinite alternate}
 @keyframes pulse{from{opacity:.55}to{opacity:1}}
-#prompt{position:absolute;bottom:calc(150px + var(--sab));left:50%;transform:translateX(-50%);background:rgba(8,12,22,.88);border:1px solid var(--line);border-radius:14px;padding:8px 16px;text-align:center;min-width:220px;max-width:92vw}
+#prompt{position:absolute;bottom:calc(168px + var(--sab));left:50%;transform:translateX(-50%);background:rgba(8,12,22,.88);border:1px solid var(--line);border-radius:14px;padding:8px 16px;text-align:center;min-width:220px;max-width:92vw}
 #promptText{font-family:var(--display);font-weight:700}
 #prompt .bar i{transition:none}
 #mini{position:absolute;right:calc(10px + var(--sar));top:calc(64px + var(--sat));width:150px;height:150px;border-radius:12px;border:1px solid var(--line);background:#0a0f1c;pointer-events:auto!important;cursor:pointer}
@@ -95,22 +111,24 @@ kbd{font-family:ui-monospace,Menlo,monospace;font-size:.82em;background:#1b2540;
 #touch{position:absolute;inset:0;display:none}
 #stick{position:absolute;width:120px;height:120px;border-radius:50%;border:2px solid rgba(255,255,255,.25);background:rgba(255,255,255,.06);display:none}
 #stick i{position:absolute;left:50%;top:50%;width:52px;height:52px;margin:-26px 0 0 -26px;border-radius:50%;background:rgba(255,255,255,.35)}
-#btnAct,#btnRun{position:absolute;border-radius:50%;pointer-events:auto!important;font-size:1rem;display:flex;align-items:center;justify-content:center;padding:0}
-#btnAct{right:calc(18px + var(--sar));bottom:calc(34px + var(--sab));width:92px;height:92px;background:rgba(243,180,63,.9);color:#1c1402;border-color:#ffd27a}
-#btnRun{right:calc(124px + var(--sar));bottom:calc(22px + var(--sab));width:68px;height:68px;background:rgba(27,37,64,.85)}
-#btnAct.down,#btnRun.down{transform:scale(.94);filter:brightness(1.2)}
-body.touch #touch{display:block} body.touch #help{display:none} body.touch #corner{bottom:auto;top:calc(222px + var(--sat));left:auto;right:calc(10px + var(--sar));flex-direction:column}
-body.touch #prompt{bottom:calc(140px + var(--sab))}
+#btnAct,#btnNitro,#btnBrake{position:absolute;border-radius:50%;pointer-events:auto!important;font-size:.92rem;display:flex;align-items:center;justify-content:center;padding:0}
+#btnAct{right:calc(18px + var(--sar));bottom:calc(34px + var(--sab));width:90px;height:90px;background:rgba(243,180,63,.9);color:#1c1402;border-color:#ffd27a}
+#btnNitro{right:calc(120px + var(--sar));bottom:calc(20px + var(--sab));width:70px;height:70px;background:rgba(40,150,200,.85);border-color:#8fe0ff}
+#btnBrake{right:calc(34px + var(--sar));bottom:calc(136px + var(--sab));width:66px;height:66px;background:rgba(27,37,64,.85)}
+#btnAct.down,#btnNitro.down,#btnBrake.down{transform:scale(.94);filter:brightness(1.25)}
+body.touch #touch{display:block} body.touch #help{display:none} body.touch #dash{left:50%;transform:translateX(-50%);bottom:calc(10px + var(--sab));align-items:center} body.touch #speed b{font-size:1.9rem} body.touch #corner{bottom:auto;top:calc(222px + var(--sat));left:auto;right:calc(10px + var(--sar));flex-direction:column}
+body.touch #prompt{bottom:calc(214px + var(--sab))}
 #toast{position:fixed;left:50%;bottom:calc(24px + var(--sab));transform:translateX(-50%);background:#1b2540;border:1px solid var(--line);border-radius:12px;padding:10px 16px;z-index:40;opacity:0;transition:opacity .25s;pointer-events:none;max-width:92vw;text-align:center}
 #toast.on{opacity:1}
 #loading{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:var(--bg);z-index:50;font-family:var(--display);font-size:1.3rem;color:var(--muted)}
 @media (max-width:900px){ #help{display:none} }
 @media (max-width:560px){ #mini{width:112px;height:112px} #loot{min-width:118px} #timer{font-size:1.6rem} body.touch #corner{top:calc(184px + var(--sat))}
   #feed{left:calc(10px + var(--sal));right:calc(132px + var(--sar));top:calc(104px + var(--sat));transform:none;width:auto;align-items:flex-start} #feed div{border-radius:12px;text-align:left;font-size:.86rem} #phase{max-width:120px} }
-@media (max-height:460px){ #prompt{bottom:calc(64px + var(--sab));padding:5px 12px} body.touch #prompt{bottom:calc(132px + var(--sab))} #banner{top:24%;font-size:1.7rem} #help{display:none}
-  #mini{width:100px;height:100px;top:calc(58px + var(--sat))} body.touch #corner{top:calc(164px + var(--sat))} #corner button{font-size:.78rem;padding:.3em .7em}
+@media (max-height:460px){ #prompt{bottom:calc(92px + var(--sab));padding:5px 12px} body.touch #prompt{bottom:auto;top:calc(96px + var(--sat))} #banner{top:24%;font-size:1.7rem} #help{display:none}
+  #mini{width:100px;height:100px;top:calc(58px + var(--sat))} body.touch #corner{top:calc(164px + var(--sat))} #corner button{font-size:.74rem;padding:.25em .6em}
   .card{padding:14px;gap:9px} .title{font-size:2.1rem} .result{font-size:1.7rem} #feed{top:calc(60px + var(--sat))} #feed div{font-size:.84rem}
-  #btnAct{width:80px;height:80px;bottom:calc(20px + var(--sab))} #btnRun{width:60px;height:60px;right:calc(108px + var(--sar));bottom:calc(14px + var(--sab))} }
+  #btnAct{width:78px;height:78px;bottom:calc(18px + var(--sab))} #btnNitro{width:60px;height:60px;right:calc(104px + var(--sar));bottom:calc(12px + var(--sab))} #btnBrake{width:56px;height:56px;right:calc(30px + var(--sar));bottom:calc(104px + var(--sab))}
+  #bust{top:30%} #dash{bottom:calc(8px + var(--sab))} #speed b{font-size:1.8rem} }
 @media (prefers-reduced-motion:reduce){ #feed div,#threat{animation:none} }
 </style>
 </head>
@@ -121,9 +139,8 @@ body.touch #prompt{bottom:calc(140px + var(--sab))}
 <div id="hud" hidden>
   <div id="topbar">
     <div id="left">
-      <div id="role" class="pill">CHOR</div>
+      <div class="rowpill"><div id="role" class="pill">CHOR</div><div id="wanted" class="pill" title="Wanted level"></div></div>
       <div id="bag">Bag: empty</div>
-      <div id="stam"><i></i></div>
     </div>
     <div><div id="timer">6:00</div><div id="phase"></div></div>
     <div id="loot"><div id="lootText">₹0 / ₹700</div><div class="bar"><i id="lootBar"></i></div></div>
@@ -131,26 +148,40 @@ body.touch #prompt{bottom:calc(140px + var(--sab))}
   <div id="feed"></div>
   <div id="banner"></div>
   <div id="threat"></div>
+  <div id="bust" hidden><div id="bustText">BUST</div><div class="bar"><i id="bustBar"></i></div></div>
   <div id="prompt" hidden><div id="promptText"></div><div class="bar" id="promptBarWrap"><i id="promptBar"></i></div></div>
+  <div id="hideui"><div class="lb top"></div><div class="lb bot"></div><div id="hideText">Engine off. Lights off.</div><div id="hideMeter"><i></i></div></div>
+  <div id="dash">
+    <div id="speed"><b id="speedNum">0</b><span>km/h</span></div>
+    <div id="nitro" title="Nitro"><i></i></div>
+    <div id="lamp" title="Headlights">LIGHTS ON</div>
+  </div>
   <canvas id="mini" width="300" height="300" aria-label="Map. Tap to enlarge."></canvas>
   <div id="touch">
     <div id="stick"><i></i></div>
-    <button id="btnRun">RUN</button>
+    <button id="btnBrake">DRIFT</button>
+    <button id="btnNitro">NITRO</button>
     <button id="btnAct">ACT</button>
   </div>
-  <div id="corner"><button id="btnPause">Menu</button><button id="btnMute">Sound on</button></div>
-  <div id="help"><kbd>WASD</kbd> move · <kbd>Space</kbd> action · <kbd>Shift</kbd> run · drag or <kbd>Q</kbd><kbd>E</kbd> turn · <kbd>M</kbd> map</div>
+  <div id="corner"><button id="btnPause">Menu</button><button id="btnLights">Lights</button><button id="btnMute">Sound on</button></div>
+  <div id="help"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> drive · <kbd>E</kbd> action · <kbd>Shift</kbd> nitro · <kbd>Space</kbd> handbrake · <kbd>L</kbd> lights · <kbd>M</kbd> map</div>
 </div>
 
 <div id="menu" class="screen" hidden>
   <div class="card">
     <div>
       <h1 class="title">CHOR <b>POLICE</b></h1>
-      <p class="sub">Jugnupur ki Raat · rob the town, dodge the police</p>
+      <p class="sub">Jugnupur ki Raat · rob the town, lose the jeeps</p>
     </div>
-    <div>
-      <div class="label">Your name</div>
-      <input id="name" maxlength="14" autocomplete="off" spellcheck="false" placeholder="Chhotu">
+    <div class="row" style="align-items:flex-end">
+      <div style="flex:2 1 180px">
+        <div class="label">Your name</div>
+        <input id="name" maxlength="14" autocomplete="off" spellcheck="false" placeholder="Chhotu">
+      </div>
+      <div style="flex:3 1 220px">
+        <div class="label">Getaway car paint <span id="paintName"></span></div>
+        <div id="paints" role="radiogroup" aria-label="Car paint"></div>
+      </div>
     </div>
     <button id="btnSolo" class="primary">Play solo · Night 1</button>
     <div class="row">
@@ -163,16 +194,21 @@ body.touch #prompt{bottom:calc(140px + var(--sab))}
     </div>
     <div class="err" id="menuErr"></div>
     <div class="rank"><span>Rank: <b id="rankName">Naya Chor</b></span><span>Loot banked: <b id="rankLoot">₹0</b></span></div>
+    <div class="row opts">
+      <button id="btnQuality" class="ghost">Graphics: Auto</button>
+      <button id="btnMusic" class="ghost">Music: on</button>
+    </div>
     <details>
       <summary>How to play</summary>
       <ul>
-        <li><b style="color:var(--loot)">Chor:</b> rob the glowing gold boxes, then carry the loot to a green beam in one of the four corners. Bank the target before time runs out.</li>
-        <li>Hide in the violet circles. Police cannot see you there unless they search that exact spot.</li>
-        <li>Running is fast but noisy. The three big tijoris open when the clock tower chimes at 1:00.</li>
-        <li>Pink dashed trails are shortcuts the police AI will not follow. Crawl pipes are for chors only.</li>
-        <li><b style="color:var(--police)">Police:</b> touch a chor to arrest. Follow the alarms on your map and search hiding spots.</li>
-        <li>With friends, a free chor can pull a lever beside the lock-up to free everyone inside.</li>
-        <li><kbd>WASD</kbd> or arrows to move, <kbd>Space</kbd> action, <kbd>Shift</kbd> run, drag or <kbd>Q</kbd> <kbd>E</kbd> to turn the camera, <kbd>M</kbd> map. On a phone: left thumb moves, right thumb turns.</li>
+        <li><b style="color:var(--loot)">Chor:</b> drive onto a gold ring, stop, and hold the action button to rob it. Carry the loot to a green beam in one of the four corners. Bank the target before time runs out.</li>
+        <li>A police jeep that stays close while you are slow or stopped fills the <b style="color:var(--danger)">bust meter</b>. Keep moving, or lose them.</li>
+        <li>Hide in a garage, godown or shed (violet arrows): stop inside and hold action. The door comes down, your lights go off, and the jeeps drive past. If one stops to search your hideout, burst out before it finishes.</li>
+        <li>Pink dashed lanes are tang galis: your small car fits, police jeeps do not.</li>
+        <li>Nitro is fast but loud. Switching your headlights off makes you harder to spot from far away.</li>
+        <li>The three big tijoris open when the clock tower chimes at 1:00.</li>
+        <li><b style="color:var(--police)">Police:</b> box the chor in to bust them. Follow alarms and tip-offs on your map, and stop in front of hideouts to search them.</li>
+        <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or arrows to drive, <kbd>E</kbd> action, <kbd>Shift</kbd> nitro, <kbd>Space</kbd> handbrake, <kbd>L</kbd> lights, <kbd>M</kbd> map. On a phone: the left thumb steers and accelerates, the buttons on the right do the rest.</li>
       </ul>
     </details>
   </div>
@@ -197,6 +233,7 @@ body.touch #prompt{bottom:calc(140px + var(--sab))}
   <div class="card">
     <h2>Paused</h2>
     <p class="small" id="pauseNote">The round keeps running while this menu is open.</p>
+    <div class="row opts"><button id="btnQuality2" class="ghost">Graphics: Auto</button><button id="btnMusic2" class="ghost">Music: on</button></div>
     <div class="row"><button id="btnResume" class="primary">Back to the game</button><button id="btnQuit">Leave round</button></div>
   </div>
 </div>

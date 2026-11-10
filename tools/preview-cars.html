@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>cars.js preview</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #05070c; color: #cfd6e4; font: 12px/1.4 system-ui, "Segoe UI", sans-serif; overflow: hidden; }
+  canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+  #hud { position: fixed; left: 10px; top: 8px; right: 10px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; pointer-events: none; }
+  #hud button { pointer-events: auto; background: #151b2a; color: #cfd6e4; border: 1px solid #2c3650; border-radius: 4px; padding: 3px 9px; font: inherit; cursor: pointer; }
+  #hud button.on { background: #2a3a66; border-color: #5a78c8; }
+  #info { margin-left: auto; opacity: 0.75; font-variant-numeric: tabular-nums; }
+  .tag { position: fixed; transform: translate(-50%, 0); white-space: nowrap; text-align: center; font-size: 11px; color: #aeb8cc; text-shadow: 0 1px 2px #000; pointer-events: none; }
+  .tag b { display: block; color: #e8ecf5; font-weight: 600; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud"><span id="views"></span><button id="bloomBtn">bloom</button><button id="pauseBtn">pause</button><span id="info"></span></div>
+<script type="module">
+// Preview for js/cars.js: every getaway paint in a row plus two police jeeps, lit like the game at night.
+// Drag to orbit, wheel to zoom. URL options: ?view=chase|close|rear|side|top|one  &bloom=0  &dim=0.6  &t=1.25 (freeze time)  &tags=0
+import * as THREE from '../vendor/three.module.min.js';
+import { PAINTS, makeCar } from '../js/cars.js';
+
+const Q = new URLSearchParams(location.search);
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(1);
+renderer.info.autoReset = false;
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0a0f1d);
+scene.fog = new THREE.Fog(0x0a0f1d, 14, 46);
+const camera = new THREE.PerspectiveCamera(50, 1, 0.3, 170);
+const dim = Q.has('dim') ? +Q.get('dim') : 1;
+scene.add(new THREE.HemisphereLight(0x7d8cc0, 0x2a2e40, 1.0 * dim));
+const moon = new THREE.DirectionalLight(0xb4c2ff, 0.75 * dim); moon.position.set(-30, 40, 45); scene.add(moon);
+
+// dark road-coloured ground with a little grain and lane dashes
+const gc = document.createElement('canvas'); gc.width = gc.height = 256;
+const g2 = gc.getContext('2d'); g2.fillStyle = '#4b4e56'; g2.fillRect(0, 0, 256, 256);
+for (let k = 0; k < 2600; k++) { const v = 60 + Math.random() * 50 | 0; g2.fillStyle = `rgba(${v},${v},${v + 6},0.5)`; g2.fillRect(Math.random() * 256, Math.random() * 256, 2, 2); }
+g2.fillStyle = '#8a8a80'; g2.fillRect(124, 20, 8, 90);
+const gt = new THREE.CanvasTexture(gc); gt.colorSpace = THREE.SRGBColorSpace; gt.wrapS = gt.wrapT = THREE.RepeatWrapping; gt.repeat.set(30, 30); gt.anisotropy = 4;
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(120, 120), new THREE.MeshStandardMaterial({ map: gt, roughness: 0.95, metalness: 0 }));
+ground.rotation.x = -Math.PI / 2; scene.add(ground);
+
+// the line-up. A camera behind the cars looks along +Z, where screen-right is -X, so the first car goes at +X.
+const STEP = 0.98, X0 = 4.5 * STEP;
+const plan = [
+  { what: 'driving, steering', st: t => ({ speed: 2.2 + Math.sin(t * 1.3) * 1.2, steer: Math.sin(t * 1.1), lights: true }) },
+  { what: 'braking', st: t => ({ speed: 1.2, steer: 0, lights: true, brake: true }) },
+  { what: 'reversing', st: t => ({ speed: -0.8, steer: Math.sin(t * 0.9) * 0.6, lights: true }) },
+  { what: 'nitro', st: t => ({ speed: 4.5, steer: 0, lights: true, nitro: true }) },
+  { what: 'lights off', st: t => ({ speed: 1.5, steer: 0, lights: false }) },
+  { what: 'hidden', st: t => ({ speed: 0, steer: 0, lights: true, hidden: true }) },
+  { what: 'hidden ghost (alpha 0.4)', st: t => ({ speed: 0, steer: 0.4, lights: true, hidden: true, alpha: 0.4 }) },
+  { what: 'steer -1, brake blink', st: t => ({ speed: 2.5, steer: -1, lights: true, brake: Math.sin(t * 3) > 0.3 }) },
+  { what: 'siren on', kind: 'police', st: t => ({ speed: 3 + Math.sin(t * 1.3), steer: Math.sin(t * 0.8) * 0.7, lights: true, siren: true }) },
+  { what: 'siren off, nitro', kind: 'police', st: t => ({ speed: 2, steer: 0, lights: true, siren: false, nitro: Math.sin(t * 1.5) > 0 }) },
+];
+const cars = plan.map((p, i) => {
+  const car = makeCar(p.kind || 'chor', { paint: PAINTS[i % PAINTS.length].hex });
+  car.g.position.set(X0 - i * STEP, 0, 0);
+  scene.add(car.g);
+  const tag = document.createElement('div'); tag.className = 'tag';
+  tag.innerHTML = `<b>${p.kind === 'police' ? 'Police' : PAINTS[i].name}</b>${p.what}`;
+  document.body.appendChild(tag);
+  return { car, p, tag };
+});
+
+// views
+const xOf = i => X0 - i * STEP;
+const VIEWS = {
+  chase: { pos: [0, 6.9, -5.8], at: [0, 0, 0.55] },
+  close: { pos: [xOf(7.5) - 0.2, 0.62, 1.75], at: [xOf(7.5), 0.14, 0] },
+  rear: { pos: [xOf(2) + 0.5, 0.95, -1.9], at: [xOf(2), 0.1, -0.15] },
+  side: { pos: [xOf(0) + 1.7, 0.33, 0.25], at: [xOf(0.5), 0.14, 0] },
+  top: { pos: [0, 9.5, 0.01], at: [0, 0, 0.9] },
+  one: { pos: [xOf(8), 7 * Math.sin(0.87), -7 * Math.cos(0.87)], at: [xOf(8), 0.2, 0.3] },
+  jeep: { pos: [xOf(8.5) + 1.3, 0.75, -1.5], at: [xOf(8.5), 0.18, 0] },
+  front: { pos: [xOf(3.5), 0.5, 2.6], at: [xOf(3.5), 0.14, 0] },
+};
+const target = new THREE.Vector3(), orbit = { r: 9, th: 0, ph: 0.9 };
+function setView(name) {
+  const v = VIEWS[name] || VIEWS.chase;
+  target.fromArray(v.at);
+  const d = new THREE.Vector3().fromArray(v.pos).sub(target);
+  orbit.r = d.length(); orbit.th = Math.atan2(d.x, d.z); orbit.ph = Math.asin(d.y / orbit.r);
+  for (const b of document.querySelectorAll('#views button')) b.classList.toggle('on', b.textContent === name);
+}
+function placeCamera() {
+  const c = Math.cos(orbit.ph);
+  camera.position.set(target.x + orbit.r * c * Math.sin(orbit.th), target.y + orbit.r * Math.sin(orbit.ph), target.z + orbit.r * c * Math.cos(orbit.th));
+  camera.lookAt(target);
+}
+for (const name of Object.keys(VIEWS)) {
+  const b = document.createElement('button'); b.textContent = name; b.onclick = () => setView(name);
+  document.getElementById('views').appendChild(b);
+}
+setView(Q.get('view') || 'chase');
+let drag = null;
+canvas.addEventListener('pointerdown', e => { drag = [e.clientX, e.clientY]; canvas.setPointerCapture(e.pointerId); });
+canvas.addEventListener('pointerup', () => { drag = null; });
+canvas.addEventListener('pointermove', e => {
+  if (!drag) return;
+  orbit.th -= (e.clientX - drag[0]) * 0.006; orbit.ph = Math.max(0.02, Math.min(1.55, orbit.ph + (e.clientY - drag[1]) * 0.006));
+  drag = [e.clientX, e.clientY];
+});
+canvas.addEventListener('wheel', e => { orbit.r = Math.max(0.6, Math.min(40, orbit.r * (e.deltaY > 0 ? 1.1 : 0.9))); e.preventDefault(); }, { passive: false });
+
+// bloom like the game, if the vendored passes are there
+let composer = null, bloomOn = Q.get('bloom') !== '0';
+try {
+  const [{ EffectComposer }, { RenderPass }, { UnrealBloomPass }, { OutputPass }] = await Promise.all([
+    import('../vendor/addons/postprocessing/EffectComposer.js'), import('../vendor/addons/postprocessing/RenderPass.js'),
+    import('../vendor/addons/postprocessing/UnrealBloomPass.js'), import('../vendor/addons/postprocessing/OutputPass.js')]);
+  composer = new EffectComposer(renderer);
+  composer.addPass(new RenderPass(scene, camera));
+  composer.addPass(new UnrealBloomPass(new THREE.Vector2(1024, 640), 0.7, 0.55, 0.72));
+  composer.addPass(new OutputPass());
+} catch (err) { console.warn('bloom passes not available, drawing without bloom'); }
+const bloomBtn = document.getElementById('bloomBtn'), pauseBtn = document.getElementById('pauseBtn');
+bloomBtn.onclick = () => { bloomOn = !bloomOn; };
+let paused = false; pauseBtn.onclick = () => { paused = !paused; };
+
+function resize() {
+  const w = innerWidth, h = innerHeight;
+  renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
+  if (composer) composer.setSize(w, h);
+}
+addEventListener('resize', resize); resize();
+
+const frozen = Q.has('t') ? +Q.get('t') : null, showTags = Q.get('tags') !== '0';
+const info = document.getElementById('info'), v3 = new THREE.Vector3();
+let last = performance.now(), time = 0, frames = 0;
+function frame(now) {
+  requestAnimationFrame(frame);
+  const dt = Math.min(0.1, (now - last) / 1000); last = now;
+  if (!paused) time += dt;
+  const t = frozen == null ? time : frozen;
+  for (const c of cars) c.car.update(c.p.st(t), paused ? 0 : dt, t);
+  placeCamera();
+  renderer.info.reset();
+  if (composer && bloomOn) composer.render(); else renderer.render(scene, camera);
+  bloomBtn.classList.toggle('on', !!composer && bloomOn); pauseBtn.classList.toggle('on', paused);
+  for (const c of cars) {
+    v3.set(c.car.g.position.x, 0, -0.75).project(camera);
+    const vis = showTags && v3.z < 1 && Math.abs(v3.x) < 1.05 && Math.abs(v3.y) < 1.05;
+    c.tag.style.display = vis ? '' : 'none';
+    if (vis) { c.tag.style.left = (v3.x * 0.5 + 0.5) * innerWidth + 'px'; c.tag.style.top = (-v3.y * 0.5 + 0.5) * innerHeight + 'px'; }
+  }
+  if (++frames % 20 === 0) info.textContent = `${renderer.info.render.calls} draw calls, ${renderer.info.render.triangles} triangles, ${(dt * 1000).toFixed(0)} ms`;
+  window.__frames = frames;
+}
+requestAnimationFrame(frame);
+
+// hooks for the automated check
+window.__view = setView;
+window.__stats = () => ({ calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, geometries: renderer.info.memory.geometries, textures: renderer.info.memory.textures, programs: renderer.info.programs.length, bloom: !!composer && bloomOn });
+window.__test = () => {
+  // build, animate through every state, ghost and un-ghost, then dispose: memory must come back to where it was
+  const before = { geometries: renderer.info.memory.geometries, textures: renderer.info.memory.textures };
+  const a = makeCar('chor', { paint: 0x884422 }), b = makeCar('police');
+  a.g.position.set(0, 0, 3); b.g.position.set(1, 0, 3); scene.add(a.g, b.g);
+  for (let i = 0; i < 40; i++) {
+    const s = { speed: (i - 12) * 0.3, steer: Math.sin(i), brake: i % 2 === 0, lights: i % 3 !== 0, siren: i % 4 < 2, nitro: i % 5 === 0, hidden: i > 34, alpha: i % 7 === 3 ? 0.3 : 1 };
+    a.update(s, 0.016, i * 0.016); b.update(s, 0.016, i * 0.016);
+    if (i % 8 === 0) renderer.render(scene, camera);
+  }
+  a.update(undefined, 0, 0); b.update({}, -1, NaN); a.setPaint(0x224488);
+  renderer.render(scene, camera);
+  const during = { geometries: renderer.info.memory.geometries, textures: renderer.info.memory.textures };
+  a.dispose(); b.dispose();
+  renderer.render(scene, camera);
+  const after = { geometries: renderer.info.memory.geometries, textures: renderer.info.memory.textures };
+  return { before, during, after, detached: !a.g.parent && !b.g.parent };
+};
+window.__cars = cars; window.__ready = true;
+</script>
+</body>
+</html>
