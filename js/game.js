@@ -84,7 +84,16 @@ function ping(x, y, dur, col) { S.pings.push({ x, y, t0: performance.now(), dur:
 const myName = () => (($('name').value || '').trim().slice(0, 14)) || 'Chhotu';
 
 // ------------------------------------------------------------------ match setup
-function clearDyn() { while (dyn.children.length) dyn.remove(dyn.children[0]); }
+// take a figure (and everything attached to it) out of the scene and free its GPU memory
+function dropObject(obj) {
+  obj.traverse(o => {
+    const k = LABELS.indexOf(o); if (k >= 0) { LABELS.splice(k, 1); if (o.material.map) o.material.map.dispose(); }
+    if (o.geometry) o.geometry.dispose();
+    if (o.material) o.material.dispose();
+  });
+  if (obj.parent) obj.parent.remove(obj);
+}
+function clearDyn() { while (dyn.children.length) dropObject(dyn.children[0]); }
 function newPlayer(p, k) {
   const isMe = p.id === S.myId;
   const P = {
@@ -214,7 +223,7 @@ function doAction(P, type, i) {
 function removePlayer(id) {
   const P = S.players.get(id); if (!P) return;
   for (const i of P.carry) { S.sites[i].robbed = false; S.sites[i].prog = 0; }
-  dyn.remove(P.char.g); S.players.delete(id);
+  dropObject(P.char.g); S.players.delete(id);
   ev({ t: 'left', m: P.name + ' left the game.', who: id });
   if (S.isHost && !S.over && S.screen === 'play') {
     const all = chors();
@@ -412,7 +421,7 @@ function handleEvent(e) {
     case 'free': feed(e.m, 'good'); sfx.free(); if (mine) banner('AZAAD!', 'green'); break;
     case 'chime': banner(e.m, 'gold'); feed(e.m, 'gold'); sfx.chime(); break;
     case 'spot': banner('DEKH LIYA! RUN!', 'red'); sfx.spotted(); break;
-    case 'left': { feed(e.m); const P = S.players.get(e.who); if (P && !S.isHost) { dyn.remove(P.char.g); S.players.delete(e.who); } break; }
+    case 'left': { feed(e.m); const P = S.players.get(e.who); if (P && !S.isHost) { dropObject(P.char.g); S.players.delete(e.who); } break; }
     default: if (e.m) feed(e.m);
   }
 }
