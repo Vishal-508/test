@@ -1,0 +1,6 @@
+{
+  "name": "chor-police-jugnupur",
+  "private": true,
+  "type": "module",
+  "description": "Chor Police: a 3D browser game of thieves and police in the night town of Jugnupur. Static site, no build step."
+}

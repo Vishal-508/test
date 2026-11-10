@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Chor Police: Jugnupur ki Raat</title>
+<meta name="description" content="A 3D chor-police game. Rob the night town of Jugnupur, hide from the police, and play with friends using a room code.">
+<meta name="theme-color" content="#0a0f1d">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230a0f1d'/%3E%3Ccircle cx='16' cy='16' r='9' fill='%23f3b43f'/%3E%3Crect x='7' y='13' width='18' height='5' fill='%23111318'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;700;800&family=Hind:wght@400;500;600&display=swap">
+<style>
+:root{
+  --bg:#0a0f1d; --panel:rgba(14,20,36,.92); --line:#28324b; --fg:#e9eef8; --muted:#9ba7c0;
+  --loot:#f3b43f; --police:#6a98ff; --escape:#3bc98b; --hide:#ad90ff; --route:#ff6f9f; --danger:#ff4a4a;
+  --display:"Baloo 2","Trebuchet MS",system-ui,sans-serif; --body:"Hind","Segoe UI",system-ui,sans-serif;
+  --sat: env(safe-area-inset-top,0px); --sab: env(safe-area-inset-bottom,0px); --sal: env(safe-area-inset-left,0px); --sar: env(safe-area-inset-right,0px);
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font-family:var(--body);font-size:16px;overflow:hidden;overscroll-behavior:none;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
+[hidden]{display:none!important}
+canvas#c{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none;outline:none}
+h1,h2,h3{font-family:var(--display);margin:0;line-height:1.05}
+button{font-family:var(--display);font-weight:700;font-size:1.05rem;color:var(--fg);background:#1b2540;border:1px solid var(--line);border-radius:12px;padding:.6em 1.1em;cursor:pointer;touch-action:manipulation}
+button:hover{background:#243154} button:active{transform:translateY(1px)}
+button:focus-visible,input:focus-visible{outline:2px solid var(--loot);outline-offset:2px}
+button.primary{background:var(--loot);color:#1c1402;border-color:#ffd27a} button.primary:hover{background:#ffc657}
+button.blue{background:#2d55c4;border-color:#5b83f0} button.blue:hover{background:#3964d8}
+button.ghost{background:transparent} button:disabled{opacity:.45;cursor:not-allowed}
+input{font-family:var(--body);font-size:1.05rem;color:var(--fg);background:#0d1426;border:1px solid var(--line);border-radius:10px;padding:.6em .8em;width:100%;-webkit-user-select:text;user-select:text}
+
+/* ---------- menus */
+.screen{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:calc(12px + var(--sat)) calc(12px + var(--sar)) calc(12px + var(--sab)) calc(12px + var(--sal));background:radial-gradient(ellipse at center,rgba(8,12,24,.5),rgba(6,9,18,.9));overflow:auto;z-index:20}
+.card{width:min(100%,460px);background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:22px;display:flex;flex-direction:column;gap:14px;box-shadow:0 20px 60px rgba(0,0,0,.5);margin:auto}
+.card.wide{width:min(100%,760px)}
+.title{font-size:clamp(2.4rem,9vw,3.6rem);font-weight:800;letter-spacing:.01em;color:var(--loot);text-shadow:0 3px 0 #5a3c05,0 0 28px rgba(243,180,63,.35)}
+.title b{color:var(--police);text-shadow:0 3px 0 #17306e,0 0 28px rgba(106,152,255,.35)}
+.sub{color:var(--muted);margin-top:-8px}
+.row{display:flex;gap:10px;flex-wrap:wrap} .row>*{flex:1 1 140px}
+.label{font-size:.78rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.rank{display:flex;justify-content:space-between;gap:10px;font-size:.92rem;color:var(--muted);border-top:1px solid var(--line);padding-top:10px}
+.rank b{color:var(--fg)}
+details{border-top:1px solid var(--line);padding-top:10px;font-size:.95rem;color:var(--muted)} summary{cursor:pointer;color:var(--fg);font-family:var(--display);font-weight:700}
+details ul{margin:8px 0 0;padding-left:1.1em;display:flex;flex-direction:column;gap:5px}
+kbd{font-family:ui-monospace,Menlo,monospace;font-size:.82em;background:#1b2540;border:1px solid var(--line);border-radius:5px;padding:1px 5px;color:var(--fg)}
+.err{color:#ff9c9c;font-size:.93rem;min-height:1.2em}
+.code{font-family:var(--display);font-weight:800;font-size:2.6rem;letter-spacing:.18em;color:var(--loot);text-align:center;-webkit-user-select:text;user-select:text}
+.plist{display:flex;flex-direction:column;gap:6px;margin:0;padding:0;list-style:none}
+.plist li{display:flex;align-items:center;gap:10px;background:#0d1426;border:1px solid var(--line);border-radius:10px;padding:8px 12px}
+.plist .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
+.tag{font-family:var(--display);font-weight:700;font-size:.85rem;border-radius:999px;padding:2px 12px}
+.tag.chor{background:rgba(243,180,63,.16);color:var(--loot);border:1px solid rgba(243,180,63,.5)}
+.tag.police{background:rgba(106,152,255,.16);color:var(--police);border:1px solid rgba(106,152,255,.5)}
+.small{font-size:.9rem;color:var(--muted)}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:10px}
+.stats div{background:#0d1426;border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.stats b{display:block;font-family:var(--display);font-size:1.3rem}
+.result{font-size:clamp(2rem,8vw,3rem);font-weight:800}
+.result.win{color:var(--escape)} .result.lose{color:var(--danger)}
+
+/* ---------- HUD */
+#hud{position:fixed;inset:0;pointer-events:none;z-index:10}
+#hud>*{pointer-events:none}
+#topbar{position:absolute;top:calc(8px + var(--sat));left:calc(10px + var(--sal));right:calc(10px + var(--sar));display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+.pill{font-family:var(--display);font-weight:800;border-radius:999px;padding:3px 14px;background:var(--panel);border:1px solid var(--line);white-space:nowrap}
+#role.chor{color:var(--loot);border-color:rgba(243,180,63,.6)} #role.police{color:var(--police);border-color:rgba(106,152,255,.6)}
+#left{display:flex;flex-direction:column;gap:6px;align-items:flex-start;min-width:0}
+#bag{font-size:.9rem;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:3px 10px}
+#stam{width:110px;height:6px;background:rgba(255,255,255,.12);border-radius:4px;overflow:hidden} #stam i{display:block;height:100%;width:100%;background:#7de0ff;border-radius:4px}
+#timer{font-family:var(--display);font-weight:800;font-size:1.9rem;line-height:1;text-shadow:0 2px 8px #000;font-variant-numeric:tabular-nums}
+#timer.low{color:var(--danger)}
+#phase{font-size:.8rem;color:var(--muted);text-align:center;text-shadow:0 1px 4px #000}
+#loot{min-width:150px;text-align:right;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:5px 10px}
+#lootText{font-family:var(--display);font-weight:700;font-variant-numeric:tabular-nums}
+.bar{height:7px;background:rgba(255,255,255,.12);border-radius:4px;overflow:hidden;margin-top:3px} .bar i{display:block;height:100%;width:0;background:var(--loot);border-radius:4px;transition:width .15s linear}
+#feed{position:absolute;top:calc(74px + var(--sat));left:50%;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:5px;width:min(92vw,520px)}
+#feed div{background:rgba(8,12,22,.82);border:1px solid var(--line);border-radius:999px;padding:3px 14px;font-size:.92rem;animation:fin .25s ease-out;text-align:center}
+#feed .alarm{border-color:rgba(255,74,74,.7);color:#ffb3b3} #feed .good{border-color:rgba(59,201,139,.7);color:#a8f3d0} #feed .gold{border-color:rgba(243,180,63,.7);color:#ffdf9c}
+@keyframes fin{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
+#banner{position:absolute;top:27%;left:50%;transform:translate(-50%,-50%);font-family:var(--display);font-weight:800;font-size:clamp(1.8rem,7vw,3.2rem);text-align:center;text-shadow:0 3px 0 rgba(0,0,0,.6),0 0 30px rgba(0,0,0,.8);opacity:0;transition:opacity .25s;width:92vw}
+#banner.on{opacity:1} #banner.red{color:var(--danger)} #banner.gold{color:var(--loot)} #banner.green{color:var(--escape)} #banner.blue{color:var(--police)}
+#prompt{position:absolute;bottom:calc(150px + var(--sab));left:50%;transform:translateX(-50%);background:rgba(8,12,22,.88);border:1px solid var(--line);border-radius:14px;padding:8px 16px;text-align:center;min-width:220px;max-width:92vw}
+#promptText{font-family:var(--display);font-weight:700}
+#prompt .bar i{transition:none}
+#mini{position:absolute;right:calc(10px + var(--sar));top:calc(64px + var(--sat));width:150px;height:150px;border-radius:12px;border:1px solid var(--line);background:#0a0f1c;pointer-events:auto!important;cursor:pointer}
+#mini.big{width:min(86vw,74vh,520px);height:min(86vw,74vh,520px);right:50%;top:50%;transform:translate(50%,-50%);z-index:5;box-shadow:0 0 0 100vmax rgba(4,6,12,.6)}
+#vignette{position:fixed;inset:0;pointer-events:none;z-index:9;opacity:0;box-shadow:inset 0 0 120px 40px rgba(255,30,30,.55);transition:opacity .2s}
+#corner{position:absolute;left:calc(10px + var(--sal));bottom:calc(10px + var(--sab));display:flex;gap:8px;pointer-events:auto!important}
+#corner button{font-size:.85rem;padding:.4em .8em;background:rgba(14,20,36,.85)}
+#help{position:absolute;left:50%;bottom:calc(10px + var(--sab));transform:translateX(-50%);font-size:.82rem;color:var(--muted);text-shadow:0 1px 3px #000;white-space:nowrap}
+/* touch controls */
+#touch{position:absolute;inset:0;display:none}
+#stick{position:absolute;width:120px;height:120px;border-radius:50%;border:2px solid rgba(255,255,255,.25);background:rgba(255,255,255,.06);display:none}
+#stick i{position:absolute;left:50%;top:50%;width:52px;height:52px;margin:-26px 0 0 -26px;border-radius:50%;background:rgba(255,255,255,.35)}
+#btnAct,#btnRun{position:absolute;border-radius:50%;pointer-events:auto!important;font-size:1rem;display:flex;align-items:center;justify-content:center;padding:0}
+#btnAct{right:calc(18px + var(--sar));bottom:calc(34px + var(--sab));width:92px;height:92px;background:rgba(243,180,63,.9);color:#1c1402;border-color:#ffd27a}
+#btnRun{right:calc(124px + var(--sar));bottom:calc(22px + var(--sab));width:68px;height:68px;background:rgba(27,37,64,.85)}
+#btnAct.down,#btnRun.down{transform:scale(.94);filter:brightness(1.2)}
+body.touch #touch{display:block} body.touch #help{display:none} body.touch #corner{bottom:auto;top:calc(222px + var(--sat));left:auto;right:calc(10px + var(--sar));flex-direction:column}
+body.touch #prompt{bottom:calc(140px + var(--sab))}
+#toast{position:fixed;left:50%;bottom:calc(24px + var(--sab));transform:translateX(-50%);background:#1b2540;border:1px solid var(--line);border-radius:12px;padding:10px 16px;z-index:40;opacity:0;transition:opacity .25s;pointer-events:none;max-width:92vw;text-align:center}
+#toast.on{opacity:1}
+#loading{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:var(--bg);z-index:50;font-family:var(--display);font-size:1.3rem;color:var(--muted)}
+@media (max-width:900px){ #help{display:none} }
+@media (max-width:560px){ #mini{width:112px;height:112px} #loot{min-width:118px} #timer{font-size:1.6rem} body.touch #corner{top:calc(184px + var(--sat))}
+  #feed{left:calc(10px + var(--sal));right:calc(132px + var(--sar));top:calc(104px + var(--sat));transform:none;width:auto;align-items:flex-start} #feed div{border-radius:12px;text-align:left;font-size:.86rem} #phase{max-width:120px} }
+@media (max-height:460px){ #prompt{bottom:calc(64px + var(--sab));padding:5px 12px} body.touch #prompt{bottom:calc(132px + var(--sab))} #banner{top:24%;font-size:1.7rem} #help{display:none}
+  #mini{width:100px;height:100px;top:calc(58px + var(--sat))} body.touch #corner{top:calc(164px + var(--sat))} #corner button{font-size:.78rem;padding:.3em .7em}
+  .card{padding:14px;gap:9px} .title{font-size:2.1rem} .result{font-size:1.7rem} #feed{top:calc(60px + var(--sat))} #feed div{font-size:.84rem}
+  #btnAct{width:80px;height:80px;bottom:calc(20px + var(--sab))} #btnRun{width:60px;height:60px;right:calc(108px + var(--sar));bottom:calc(14px + var(--sab))} }
+@media (prefers-reduced-motion:reduce){ #feed div{animation:none} }
+</style>
+</head>
+<body>
+<canvas id="c" tabindex="0" aria-label="Game view"></canvas>
+<div id="vignette"></div>
+
+<div id="hud" hidden>
+  <div id="topbar">
+    <div id="left">
+      <div id="role" class="pill">CHOR</div>
+      <div id="bag">Bag: empty</div>
+      <div id="stam"><i></i></div>
+    </div>
+    <div><div id="timer">6:00</div><div id="phase"></div></div>
+    <div id="loot"><div id="lootText">₹0 / ₹700</div><div class="bar"><i id="lootBar"></i></div></div>
+  </div>
+  <div id="feed"></div>
+  <div id="banner"></div>
+  <div id="prompt" hidden><div id="promptText"></div><div class="bar" id="promptBarWrap"><i id="promptBar"></i></div></div>
+  <canvas id="mini" width="300" height="300" aria-label="Map. Tap to enlarge."></canvas>
+  <div id="touch">
+    <div id="stick"><i></i></div>
+    <button id="btnRun">RUN</button>
+    <button id="btnAct">ACT</button>
+  </div>
+  <div id="corner"><button id="btnPause">Menu</button><button id="btnMute">Sound on</button></div>
+  <div id="help"><kbd>WASD</kbd> move · <kbd>Space</kbd> action · <kbd>Shift</kbd> run · drag or <kbd>Q</kbd><kbd>E</kbd> turn · <kbd>M</kbd> map</div>
+</div>
+
+<div id="menu" class="screen" hidden>
+  <div class="card">
+    <div>
+      <h1 class="title">CHOR <b>POLICE</b></h1>
+      <p class="sub">Jugnupur ki Raat · rob the town, dodge the police</p>
+    </div>
+    <div>
+      <div class="label">Your name</div>
+      <input id="name" maxlength="14" autocomplete="off" spellcheck="false" placeholder="Chhotu">
+    </div>
+    <button id="btnSolo" class="primary">Play solo · Night 1</button>
+    <div class="row">
+      <button id="btnCreate" class="blue">Create room</button>
+      <button id="btnJoinOpen">Join room</button>
+    </div>
+    <div id="joinBox" hidden>
+      <div class="label">Room code from your friend</div>
+      <div class="row" style="flex-wrap:nowrap"><input id="code" maxlength="4" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="ABCD" style="text-transform:uppercase;letter-spacing:.2em;font-weight:700"><button id="btnJoin" class="blue" style="flex:0 0 auto">Join</button></div>
+    </div>
+    <div class="err" id="menuErr"></div>
+    <div class="rank"><span>Rank: <b id="rankName">Naya Chor</b></span><span>Loot banked: <b id="rankLoot">₹0</b></span></div>
+    <details>
+      <summary>How to play</summary>
+      <ul>
+        <li><b style="color:var(--loot)">Chor:</b> rob the glowing gold boxes, then carry the loot to a green beam in one of the four corners. Bank the target before time runs out.</li>
+        <li>Hide in the violet circles. Police cannot see you there unless they search that exact spot.</li>
+        <li>Running is fast but noisy. The three big tijoris open when the clock tower chimes at 1:00.</li>
+        <li>Pink dashed trails are shortcuts the police AI will not follow. Crawl pipes are for chors only.</li>
+        <li><b style="color:var(--police)">Police:</b> touch a chor to arrest. Follow the alarms on your map and search hiding spots.</li>
+        <li>With friends, a free chor can pull a lever beside the lock-up to free everyone inside.</li>
+        <li><kbd>WASD</kbd> or arrows to move, <kbd>Space</kbd> action, <kbd>Shift</kbd> run, drag or <kbd>Q</kbd> <kbd>E</kbd> to turn the camera, <kbd>M</kbd> map. On a phone: left thumb moves, right thumb turns.</li>
+      </ul>
+    </details>
+  </div>
+</div>
+
+<div id="lobby" class="screen" hidden>
+  <div class="card">
+    <h2>Room</h2>
+    <div class="code" id="roomCode">----</div>
+    <div class="row"><button id="btnCopy">Copy invite link</button></div>
+    <div class="label">Players (<span id="pcount">1</span>/8)</div>
+    <ul class="plist" id="plist"></ul>
+    <div class="label">Your side</div>
+    <div class="row"><button id="btnRoleChor" class="primary">Chor</button><button id="btnRolePolice" class="blue">Police</button></div>
+    <p class="small" id="lobbyInfo"></p>
+    <div class="row"><button id="btnStart" class="primary">Start round</button><button id="btnLeave" class="ghost">Leave</button></div>
+    <div class="err" id="lobbyErr"></div>
+  </div>
+</div>
+
+<div id="pause" class="screen" hidden>
+  <div class="card">
+    <h2>Paused</h2>
+    <p class="small" id="pauseNote">The round keeps running while this menu is open.</p>
+    <div class="row"><button id="btnResume" class="primary">Back to the game</button><button id="btnQuit">Leave round</button></div>
+  </div>
+</div>
+
+<div id="end" class="screen" hidden>
+  <div class="card">
+    <div class="result" id="endTitle">Chors win!</div>
+    <p class="small" id="endWhy" style="margin-top:-8px"></p>
+    <div class="stats" id="endStats"></div>
+    <ul class="plist" id="endList"></ul>
+    <div class="row"><button id="btnAgain" class="primary">Play again</button><button id="btnEndMenu">Main menu</button></div>
+    <p class="small" id="endNote"></p>
+  </div>
+</div>
+
+<div id="toast"></div>
+<div id="loading">Building Jugnupur…</div>
+<script src="vendor/peerjs.min.js"></script>
+<script type="module" src="js/game.js"></script>
+</body>
+</html>
