@@ -503,6 +503,22 @@ const C_GLOW_RED = rgb(0.6, 0.04, 0.05), C_GLOW_BLUE = rgb(0.05, 0.14, 0.62);
 const HEAD_BOOST = 2.0;
 const NO_STATE = {};
 
+// Night sheen. Under the game's dim sky a dark car is a black hole in the road: black paint has next to nothing to
+// scatter and too little to mirror. So the paint carries a little cool light of its own in its emissive colour (the
+// darker the paint the more of its own hue is in it), and this patch to the standard fragment shader lets that light
+// show on the panels that face the sky, fades it down the flanks and makes it follow the vertex colours, so the door
+// shuts and the sills stay dark. All paint materials share the one patched program.
+const SHEEN_SKY = rgb(0.009, 0.012, 0.022), SHEEN_HUE = 0.045;
+function sheenShader(shader) {
+  shader.fragmentShader = shader.fragmentShader.replace('#include <emissivemap_fragment>',
+    '#include <emissivemap_fragment>\n\ttotalEmissiveRadiance *= ( 0.14 + 0.86 * smoothstep( -0.2, 0.9, dot( normal, ( viewMatrix * vec4( 0.0, 1.0, 0.0, 0.0 ) ).xyz ) ) ) * vColor.g;');
+}
+// Work out a paint material's sheen from its colour.
+function setSheen(mat) {
+  const c = mat.color, m = Math.max(c.r, c.g, c.b), k = SHEEN_HUE * (1 - smooth(0.04, 0.45, m)) / (m + 0.03);
+  mat.emissive.setRGB(SHEEN_SKY.r + c.r * k, SHEEN_SKY.g + c.g * k, SHEEN_SKY.b + c.b * k);
+}
+
 // ---------------------------------------------------------------- public: build a car
 // makeCar('chor' | 'police', { paint: 0xRRGGBB }) -> { g, kind, update(state, dt, time), dispose(), setPaint(hex) }.
 // g is a THREE.Group facing +Z, centred on the origin, wheels on y = 0. Call update() every frame.
@@ -529,6 +545,7 @@ export function makeCar(kind, opts) {
     shadow: new THREE.MeshBasicMaterial({ color: 0x000000, map: T.shadow, transparent: true, opacity: 0.62, depthWrite: false }),
     pools: glow(K.poolTint), tailGlow: glow(0x000000), flame: glow(0xffffff, THREE.DoubleSide),
   };
+  M.paint.onBeforeCompile = sheenShader; setSheen(M.paint);
   if (police) {
     M.barR = lamp(C_BAR_OFF); M.barB = lamp(C_BAR_OFF);
     M.decal = std({ color: 0xffffff, map: T.police, metalness: 0.5, roughness: 0.38, envMapIntensity: 2.0 });
@@ -668,7 +685,7 @@ export function makeCar(kind, opts) {
   }
 
   // Repaint a getaway car (police jeeps keep their livery).
-  function setPaint(hex) { if (!police && typeof hex === 'number') M.paint.color.setHex(hex); }
+  function setPaint(hex) { if (!police && typeof hex === 'number') { M.paint.color.setHex(hex); setSheen(M.paint); } }
 
   // Free what this car owns (its materials and wheel instances) and take it out of the scene.
   // Shared geometry and textures stay, for the other cars.

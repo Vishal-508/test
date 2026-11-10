@@ -6,6 +6,9 @@
 //   dressing.update(dt, time);                             // every frame (time in seconds): a few signs flicker
 //   dressing.dispose();                                    // removes and frees everything
 //
+// Optional: pass { hash2, U } with the { uCut, uRes } uniforms that js/scene.js gives its buildings, and the
+// dressing opens up in the same see-through circle round the player's car as the buildings do.
+//
 // Everything here is decoration: nothing is solid, nothing is written to the world grid, and every
 // board hangs flat on a wall so no road is narrowed.
 //
@@ -27,8 +30,8 @@ const SINGLE_MIN = 140;                       // narrowest one-word board, px
 
 const SIGN_TARGET = 88;                       // shop signs wanted
 const HOARDING_TARGET = 6;
-const FLICKER_SHARE = 0.11;                   // about one sign in ten has a failing tube
-const WEIGHT = { sarafa: 6, kotwali: 3.4, patri: 1.6, basti: 1.4, afsar: 0.3 };   // how much neon each district gets (others: none)
+const FLICKER_SHARE = 0.1;                    // one sign in ten has a failing tube
+const WEIGHT = { sarafa: 2.2, kotwali: 1, patri: 0.9, basti: 0.36, afsar: 0.5 };   // how likely a wall is to get a sign, district against district (others: never)
 
 const SIGN_W0 = 0.9, SIGN_W1 = 1.8, SIGN_H0 = 0.22, SIGN_H1 = 0.34;   // board size limits, world units
 const SIGN_Y = 0.46;                          // lowest bottom edge: just above the shop shutters
@@ -37,19 +40,19 @@ const END_GAP = 0.12;                         // ...and this far from either end
 const OFF_GLOW = 0.012, OFF_BOARD = 0.025, OFF_LIT = 0.032;   // how far each layer stands off the wall
 const HOARD_SW = 1.6, HOARD_SH = 0.6, OFF_HOARD = 0.03;
 
-const WALL_GLOW = 0.5, ROAD_GLOW = 0.26, ROAD_REACH = 0.8;   // light a sign throws on its wall and on the road below it
-const OFF_LEVEL = 0.07;                       // how bright the tubes of a flickering sign look while they are out
+const WALL_GLOW = 0.3, ROAD_GLOW = 0.12, ROAD_REACH = 0.65;  // light a sign throws on its wall and on the road below it (faint: a sheen, never a marker)
+const OFF_LEVEL = 0.05;                       // how bright the tubes of a flickering sign look while they are out
 
 const TANKS = 96, STAIRS = 80, AERIALS = 72;  // rooftop items (each tank also has a stand): 344 instances
 const ROOF_EDGE = 0.07;                       // clutter keeps this far from the roof edge
 
 // neon colours: pink, cyan, amber, green, white. `lit` is the tube colour, lifted above white so it
-// blooms; `soft` is the same hue at normal strength for the glow on wall and road.
+// blooms; `soft` is the same hue evened out to one brightness, for the glow on wall and road.
 const _c = new THREE.Color();
 const NEON = [0xff3d9a, 0x35e0ff, 0xffb02e, 0x4dff7a, 0xf2f4ff].map(hex => {
   _c.setHex(hex);
   const luma = 0.299 * _c.r + 0.587 * _c.g + 0.114 * _c.b, k = Math.min(3, Math.max(1.1, 1.05 / luma));
-  return { lit: [_c.r * k, _c.g * k, _c.b * k], soft: [_c.r, _c.g, _c.b] };
+  return { lit: [_c.r * k, _c.g * k, _c.b * k], soft: [_c.r * 0.45 / luma, _c.g * 0.45 / luma, _c.b * 0.45 / luma] };
 });
 const PINK = 0, CYAN = 1, AMBER = 2, GREEN = 3, WHITE = 4;
 const NEON_ODDS = [1.2, 1.2, 1.2, 0.8, 0.5];
@@ -139,7 +142,7 @@ function uvOf(r) { return [(r.x + 0.5) / ATLAS_W, 1 - (r.y + r.h - 0.5) / ATLAS_
 const BOARD = '#15161b', TUBE = '#ffffff';
 const latinFont = px => `700 ${px.toFixed(1)}px "Baloo 2","Trebuchet MS","Segoe UI",system-ui,sans-serif`;
 const devaFont = px => `700 ${px.toFixed(1)}px "Noto Sans Devanagari","Nirmala UI","Kohinoor Devanagari","Devanagari Sangam MN","Mangal",sans-serif`;
-const isDeva = text => /[ऀ-ॿ]/.test(text);
+const isDeva = text => /[\u0900-\u097f]/.test(text);
 const num = (v, d) => (typeof v === 'number' && isFinite(v) ? v : d);
 
 // True when this device can really draw Devanagari (two letters come out different, and not as the
@@ -150,7 +153,7 @@ function canDrawDevanagari() {
     const c = cv.getContext('2d', { willReadFrequently: true });
     if (!c) return false;
     const shot = ch => { c.fillStyle = '#000'; c.fillRect(0, 0, 64, 32); c.fillStyle = '#fff'; c.font = devaFont(22); c.textBaseline = 'middle'; c.fillText(ch, 6, 16); return c.getImageData(0, 0, 64, 32).data; };
-    const ka = shot('क'), ma = shot('म'), none = shot('￿');
+    const ka = shot('\u0915'), ma = shot('\u092e'), none = shot('\uffff');   // ka, ma, and a code point no font has
     let ink = 0, differ = 0, notBox = 0;
     for (let i = 0; i < ka.length; i += 4) { if (ka[i] > 60) ink++; if (Math.abs(ka[i] - ma[i]) > 40) differ++; if (Math.abs(ka[i] - none[i]) > 40) notBox++; }
     return ink > 12 && differ > 6 && notBox > 6;
@@ -193,7 +196,7 @@ function paintSigns(c, L, deva) {
   // one-word boards: each is fitted to its own cell and centred on its own ink
   for (const cell of L.singles) if (cell.rect) paintCell(c, cell.rect, 'F', () => {
     const text = isDeva(cell.t) && !deva ? cell.alt : cell.t, font = isDeva(text) ? devaFont : latinFont;
-    const availW = cell.w - 2 * PAD, availH = ROW - 17;
+    const availW = cell.w - 2 * PAD, availH = ROW - (isDeva(text) ? 13 : 17);   // Devanagari may reach nearer the border: its tall vowel signs are few
     c.font = font(FONT_PX + 1);
     let m = c.measureText(text);
     const h0 = num(m.actualBoundingBoxAscent, FONT_PX * 0.72) + num(m.actualBoundingBoxDescent, FONT_PX * 0.1);
@@ -229,7 +232,7 @@ const HOARDINGS = [
     c.fillStyle = '#4a111e'; c.fillRect(0, 0, w, h); c.fillStyle = '#641828';
     for (let k = 0; k < 12; k++) { const a = k * Math.PI / 6; c.beginPath(); c.moveTo(w / 2, 42); c.lineTo(w / 2 + Math.cos(a) * 200, 42 + Math.sin(a) * 200); c.lineTo(w / 2 + Math.cos(a + 0.26) * 200, 42 + Math.sin(a + 0.26) * 200); c.fill(); }
     word(c, 'TIMTIM TALKIES', w / 2, 17, 13, '#e2d2ab', w - 24); word(c, 'CHOR POLICE', w / 2, 52, 31, '#dfb22a', w - 18);
-    word(c, 'Aaj raat · teen show', w / 2, h - 8, 13, '#e091b0', w - 24);
+    word(c, 'Aaj raat \u00b7 teen show', w / 2, h - 8, 13, '#e091b0', w - 24);
   } },
   { name: 'Chamak Dant Manjan', draw(c, w, h, deva) {         // tooth powder
     c.fillStyle = '#1a5a55'; c.fillRect(0, 0, w, h);
@@ -258,7 +261,7 @@ const HOARDINGS = [
     c.fillStyle = '#bdb69b'; c.fillRect(0, 0, w, h); c.fillStyle = '#691915'; c.fillRect(0, 0, w, 21);
     word(c, 'KOTWALI THANA', w / 2, 16, 13, '#e6dbb2', w - 20);
     if (deva) word(c, 'चोरों से सावधान', w / 2, 53, 27, '#19244c', w - 16, devaFont); else word(c, 'CHORON SE SAVDHAN', w / 2, 52, 22, '#19244c', w - 16);
-    word(c, 'Jugnupur Police · Dial 100', w / 2, h - 7, 12, '#19244c', w - 20);
+    word(c, 'Jugnupur Police \u00b7 Dial 100', w / 2, h - 7, 12, '#19244c', w - 20);
   } },
 ];
 function paintHoarding(c, rect, art, deva) {
@@ -306,7 +309,7 @@ function takeAtlas() {
   c.fillStyle = '#fff'; c.fillRect(L.white.x, L.white.y, L.white.w, L.white.h);
   const tex = new THREE.CanvasTexture(cv);
   tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4;   // most boards are seen at a slant from the chase camera
-  ATLAS = { tex, canvas: cv, deva, refs: 1 };
+  ATLAS = { tex, deva, refs: 1 };
   return ATLAS;
 }
 function dropAtlas() { if (ATLAS && --ATLAS.refs <= 0) { ATLAS.tex.dispose(); ATLAS = null; } }
@@ -322,7 +325,6 @@ class Quads {
     for (let k = 0; k < 4; k++) this.col.push(rgb[0], rgb[1], rgb[2]);
     this.idx.push(this.n, this.n + 1, this.n + 2, this.n, this.n + 2, this.n + 3); this.n += 4;
   }
-  get quads() { return this.n / 4; }
   build() {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(this.pos), 3));
@@ -379,12 +381,24 @@ function takeRoofShapes() {
 }
 function dropRoofShapes() { if (ROOF && --ROOF.refs <= 0) { ROOF.tank.dispose(); ROOF.box.dispose(); ROOF.aerial.dispose(); ROOF = null; } }
 
-// The game cuts a see-through circle into whatever stands between the camera and the player's car
-// (js/scene.js, makeBuildingMaterial). Given the same uniforms, dressing is cut the same way, so no
-// sign or water tank is left hanging in that hole.
-function addCut(mat, U) {
-  if (!U) return mat;
+// Two small shader changes, applied through onBeforeCompile:
+//  - U (optional): the game cuts a see-through circle into whatever stands between the camera and the player's
+//    car (js/scene.js, makeBuildingMaterial). Given the same uniforms, dressing is cut the same way, so no sign
+//    or water tank is left hanging in that hole.
+//  - light: additive glow must fade to nothing in fog. The stock fog fades to the fog colour, and adding that
+//    on top of the scene would leave faint boxes in the distance.
+const FOG_TO_BLACK = `#ifdef USE_FOG
+          #ifdef FOG_EXP2
+            gl_FragColor.rgb *= exp( - fogDensity * fogDensity * vFogDepth * vFogDepth );
+          #else
+            gl_FragColor.rgb *= 1.0 - smoothstep( fogNear, fogFar, vFogDepth );
+          #endif
+        #endif`;
+function tweak(mat, U, light) {
+  if (!U && !light) return mat;
   mat.onBeforeCompile = sh => {
+    if (light) sh.fragmentShader = sh.fragmentShader.replace('#include <fog_fragment>', FOG_TO_BLACK);
+    if (!U) return;
     sh.uniforms.uCut = U.uCut; sh.uniforms.uRes = U.uRes;
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nvarying float vCutDepth;')
@@ -400,7 +414,7 @@ function addCut(mat, U) {
           }
         }`);
   };
-  mat.customProgramCacheKey = () => 'dressingCut';
+  mat.customProgramCacheKey = () => 'dressing' + (U ? 'Cut' : '') + (light ? 'Light' : '');
   return mat;
 }
 
@@ -420,8 +434,9 @@ function planSigns(W, rnd) {
   const facades = Array.isArray(W && W.facades) ? W.facades : [];
   // things a board should not hang behind: lamp posts and the mouths of hideouts
   const blocks = [];
-  for (const p of (Array.isArray(W && W.lamps) ? W.lamps : [])) if (p && p.post !== false) blocks.push({ x0: p.x - 0.05, y0: p.y - 0.05, x1: p.x + 0.05, y1: p.y + 0.05, pad: 0.12 });
-  for (const h of (Array.isArray(W && W.hides) ? W.hides : [])) if (h && h.bay && !h.grove) blocks.push({ x0: h.bay.x0, y0: h.bay.y0, x1: h.bay.x1, y1: h.bay.y1, pad: 0.25 });
+  const block = (x0, y0, x1, y1, pad) => { if (isFinite(x0 + y0 + x1 + y1)) blocks.push({ x0, y0, x1, y1, pad }); };
+  for (const p of (Array.isArray(W && W.lamps) ? W.lamps : [])) if (p && p.post !== false) block(p.x - 0.05, p.y - 0.05, p.x + 0.05, p.y + 0.05, 0.12);
+  for (const h of (Array.isArray(W && W.hides) ? W.hides : [])) if (h && h.bay && !h.grove) block(h.bay.x0, h.bay.y0, h.bay.x1, h.bay.y1, 0.25);
   // how far a board centred on the facade may reach to either side
   const freeHalf = f => {
     let half = f.len / 2 - END_GAP;
@@ -437,7 +452,7 @@ function planSigns(W, rnd) {
   };
   const list = [];
   facades.forEach((src, i) => {
-    if (!src || !(src.len > 0) || !(src.h > 0) || (!src.nx && !src.ny)) return;
+    if (!src || !(src.len > 0) || !(src.h > 0) || (!src.nx && !src.ny) || !isFinite(src.x + src.y + src.nx + src.ny)) return;
     const side = src.nx > 0 ? 0 : src.nx < 0 ? 1 : src.ny > 0 ? 2 : 3;
     const f = { i, x: src.x, z: src.y, nx: src.nx, nz: src.ny, len: src.len, h: src.h, kind: src.kind, district: src.district, kx: Math.round(src.x * 4) + side * 4096, kz: Math.round(src.y * 4), half: 0 };
     f.half = freeHalf(f);
@@ -463,9 +478,9 @@ function planSigns(W, rnd) {
   for (const f of list) {
     const wgt = WEIGHT[f.district] || 0, hmax = Math.min(SIGN_H1, f.h - ROOF_GAP - SIGN_Y), room = Math.min(SIGN_W1, f.half * 2);
     if (taken.has(f) || wgt <= 0 || hmax < SIGN_H0 || room < SIGN_W0) continue;
-    pool.push({ f, hmax, room, key: Math.pow(Math.max(1e-6, rnd(f.kx, f.kz, 1)), 1 / wgt) });
+    pool.push({ f, hmax, room, key: rnd(f.kx, f.kz, 1) / wgt });   // lowest key first: a wall's chance is in proportion to its district's weight
   }
-  pool.sort((a, b) => b.key - a.key || a.f.i - b.f.i);
+  pool.sort((a, b) => a.key - b.key || a.f.i - b.f.i);
   const usedPair = new Set(), usedSingle = L.singles.map(() => 0), signs = [];
   const pickNeon = u => { let t = u * NEON_ODDS.reduce((a, b) => a + b, 0); for (let k = 0; k < NEON.length; k++) { t -= NEON_ODDS[k]; if (t <= 0) return k; } return 0; };
   for (const { f, hmax, room } of pool) {
@@ -506,9 +521,11 @@ function planSigns(W, rnd) {
     const y0 = SIGN_Y + rnd(f.kx, f.kz, 6) * Math.max(0, Math.min(0.14, f.h - ROOF_GAP - h - SIGN_Y));
     if (tint < 0 || rnd(f.kx, f.kz, 7) < 0.25) tint = pickNeon(rnd(f.kx, f.kz, 8));
     parts.forEach((p, k) => { p.tint = tint; p.w = p.cell.w * h / ROW; if (k === 1 && rnd(f.kx, f.kz, 9) < 0.3) p.tint = (tint + 1 + Math.floor(rnd(f.kx, f.kz, 10) * (NEON.length - 1))) % NEON.length; });
-    const fl = rnd(f.kx, f.kz, 11) < FLICKER_SHARE ? (rnd(f.kx, f.kz, 12) < 0.5 ? 1 : 2) : 0;
-    signs.push({ f, parts, text, tint, w, h, y0, y1: y0 + h, flicker: fl });
+    signs.push({ f, parts, text, tint, w, h, y0, y1: y0 + h, flicker: 0 });
   }
+  // one in ten flickers, shared out between the two flicker groups
+  signs.map(s => ({ s, key: rnd(s.f.kx, s.f.kz, 11) })).sort((a, b) => a.key - b.key || a.s.f.i - b.s.f.i)
+    .slice(0, Math.round(signs.length * FLICKER_SHARE)).forEach((o, k) => { o.s.flicker = 1 + k % 2; });
   return { signs, hoardings };
 }
 
@@ -518,8 +535,8 @@ function planRoofs(W, rnd) {
   const roofs = boxes.filter(b => b && b.style !== 'bagh' && b.style !== 'ghat' && b.h >= 0.5 && b.w >= 0.5 && b.d >= 0.5);
   const ix = b => Math.round(b.x * 2), iz = b => Math.round(b.y * 2);
   const ranked = (salt, weights, minSide) => roofs.filter(b => (weights[b.style] === undefined ? 1 : weights[b.style]) > 0 && Math.min(b.w, b.d) >= minSide)
-    .map((b, i) => ({ b, i, key: Math.pow(Math.max(1e-6, rnd(ix(b), iz(b), salt)), 1 / (weights[b.style] === undefined ? 1 : weights[b.style])) }))
-    .sort((a, c) => c.key - a.key || a.i - c.i).map(o => o.b);
+    .map((b, i) => ({ b, i, key: rnd(ix(b), iz(b), salt) / (weights[b.style] === undefined ? 1 : weights[b.style]) }))
+    .sort((a, c) => a.key - c.key || a.i - c.i).map(o => o.b);
   // finds a free footprint (fw x fd) wholly on the roof of b; `corner` tucks it into a corner
   const placed = new Map();
   const place = (b, fw, fd, salt, corner) => {
@@ -554,7 +571,7 @@ function planRoofs(W, rnd) {
   // TV aerials, all turned roughly the same way, towards the transmitter
   for (const b of ranked(71, { huts: 1.2 }, 0.5)) {
     if (aerials.length >= AERIALS) break;
-    const s = 0.85 + 0.15 * rnd(ix(b), iz(b), 72), p = place(b, 0.3 * s, 0.3 * s, 80, false);
+    const s = 0.85 + 0.15 * rnd(ix(b), iz(b), 72), p = place(b, 0.33 * s, 0.33 * s, 80, false);   // 0.33: the tips of the longest element, whichever way it is turned
     if (p) aerials.push({ b, x: p.x, z: p.z, y: b.h, s, a: 0.6 + (rnd(ix(b), iz(b), 73) - 0.5) * 0.7 });
   }
   return { stairs, tanks, aerials };
@@ -617,15 +634,16 @@ export function buildDressing(scene, W, ctx) {
       const f = hb.f;
       wallQuad(boards, f, -hb.w / 2, hb.w / 2, hb.y0, hb.y1, OFF_HOARD, uvOf(hb.art.rect), HOARD_RGB);
       for (let k = 0; k < 4; k++) { const s = hb.w * ((k + 0.5) / 4 - 0.5); lampBox(boards, f, s - 0.03, s + 0.03, hb.y1 + 0.025, hb.y1 + 0.06, 0.02, 0.07, uvDot, LAMP_RGB); }
-      roadQuad(glow, f, -hb.w / 2 - 0.2, hb.w / 2 + 0.2, ROAD_REACH, uvGlow, scaled(LAMP_RGB, ROAD_GLOW * 0.2)); stats.glowQuads++;
+      roadQuad(glow, f, -hb.w / 2 - 0.2, hb.w / 2 + 0.2, ROAD_REACH, uvGlow, scaled(LAMP_RGB, ROAD_GLOW * 0.12)); stats.glowQuads++;
       stats.hoardings++;
     }
     const base = { map: atlas.tex, vertexColors: true };
     const light = { transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 };
-    if (boards.n) addMesh(boards.build(), addCut(keep(new THREE.MeshBasicMaterial(base)), U), 0);
-    if (glow.n) addMesh(glow.build(), addCut(keep(new THREE.MeshBasicMaterial(Object.assign({}, base, light))), U), 2);
-    if (lit[1].n) { flickA = addCut(keep(new THREE.MeshBasicMaterial(Object.assign({}, base, light))), U); addMesh(lit[1].build(), flickA, 3); }
-    if (lit[2].n) { flickB = addCut(keep(new THREE.MeshBasicMaterial(Object.assign({}, base, light))), U); addMesh(lit[2].build(), flickB, 3); }
+    const lightMat = () => tweak(keep(new THREE.MeshBasicMaterial(Object.assign({}, base, light))), U, true);
+    if (boards.n) addMesh(boards.build(), tweak(keep(new THREE.MeshBasicMaterial(base)), U, false), 0);
+    if (glow.n) addMesh(glow.build(), lightMat(), 2);
+    if (lit[1].n) addMesh(lit[1].build(), flickA = lightMat(), 3);
+    if (lit[2].n) addMesh(lit[2].build(), flickB = lightMat(), 3);
   }
 
   // ---- rooftop clutter
@@ -633,7 +651,7 @@ export function buildDressing(scene, W, ctx) {
     const plan = planRoofs(W, rnd);
     if (!plan.tanks.length && !plan.stairs.length && !plan.aerials.length) return;
     roofShapes = takeRoofShapes();
-    const mat = addCut(keep(new THREE.MeshLambertMaterial({ color: 0xffffff })), U);
+    const mat = tweak(keep(new THREE.MeshLambertMaterial({ color: 0xffffff })), U, false);
     const instanced = (geo, count) => { const im = keep(new THREE.InstancedMesh(geo, mat, count)); im.frustumCulled = false; group.add(im); stats.drawCalls++; stats.roofInstances += count; return im; };
     const put = (im, k, x, y, z, sx, sy, sz, ry, hex, dim) => {
       _dummy.position.set(x, y, z); _dummy.scale.set(sx, sy, sz); _dummy.rotation.set(0, ry, 0); _dummy.updateMatrix();
@@ -642,7 +660,7 @@ export function buildDressing(scene, W, ctx) {
     if (plan.tanks.length) {
       const im = instanced(roofShapes.tank, plan.tanks.length);
       plan.tanks.forEach((t, k) => {
-        put(im, k, t.x, t.y + t.stand, t.z, t.s, t.s, t.s, 0, t.blue ? 0x1d4d8f : 0x17191d, 1);
+        put(im, k, t.x, t.y + t.stand, t.z, t.s, t.s, t.s, 0, t.blue ? 0x22487a : 0x17191d, 1);
         debug.roof.push({ kind: 'tank', x0: t.x - t.foot / 2, x1: t.x + t.foot / 2, z0: t.z - t.foot / 2, z1: t.z + t.foot / 2, top: t.stand + 0.198 * t.s, box: t.b });
       });
       im.instanceColor.needsUpdate = true; stats.tanks = plan.tanks.length;
@@ -660,7 +678,7 @@ export function buildDressing(scene, W, ctx) {
       const im = instanced(roofShapes.aerial, plan.aerials.length);
       plan.aerials.forEach((t, k) => {
         put(im, k, t.x, t.y, t.z, t.s, t.s, t.s, t.a, 0x767c87, 1);
-        debug.roof.push({ kind: 'aerial', x0: t.x - 0.15 * t.s, x1: t.x + 0.15 * t.s, z0: t.z - 0.15 * t.s, z1: t.z + 0.15 * t.s, top: 0.34 * t.s, box: t.b });
+        debug.roof.push({ kind: 'aerial', x0: t.x - 0.165 * t.s, x1: t.x + 0.165 * t.s, z0: t.z - 0.165 * t.s, z1: t.z + 0.165 * t.s, top: 0.34 * t.s, box: t.b });
       });
       im.instanceColor.needsUpdate = true; stats.aerials = plan.aerials.length;
     }

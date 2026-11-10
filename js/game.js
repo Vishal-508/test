@@ -464,7 +464,7 @@ function hostTick(dt) {
     if (ch.galiT > 6) { ch.galiT = 0; dispatch(v, 1, false); ev({ t: 'tip', m: 'Tip-off: a car is sitting in ' + nearName(v) + '.', x: v.x, y: v.y, who: ch.id }); }
     if (!ch.carry.length) ch.tipAt = S.t;
     else if (free && !W.inPark(v.x, v.y) && !chased) {
-      const every = Math.max(5, (ch.carry.some(isJackpot) ? CFG.TIP_EVERY_JACKPOT : CFG.TIP_EVERY) - ch.heat * 1.2);
+      const every = Math.max(5, (ch.carry.some(isJackpot) ? CFG.TIP_EVERY_JACKPOT : CFG.TIP_EVERY) * (S.cfg.tipMul || 1) - ch.heat * 1.2);
       if (S.t - ch.tipAt >= every) { ch.tipAt = S.t; dispatch(v, 1 + Math.floor(ch.heat / 2), true); ev({ t: 'tip', m: 'Tip-off: a loaded getaway car was seen near ' + nearName(v) + '.', x: v.x, y: v.y, who: ch.id }); }
     }
     // the bust meter: a police vehicle staying close to a slow car fills it
@@ -477,7 +477,7 @@ function hostTick(dt) {
       else if (inGali && d < BUST.GALI_RANGE && spd < BUST.VSTOP && W.los(pc.v.x, pc.v.y, p.x, p.y)) far = true;
     }
     const slow = clamp((BUST.VSAFE - spd) / (BUST.VSAFE - BUST.VSTOP), 0, 1);
-    let rate = n ? BUST.RATE * slow * (1 + BUST.EXTRA * (n - 1)) * (ch.crashT > 0 ? 0.5 : 1) : far ? BUST.GALI : 0;
+    let rate = n ? BUST.RATE * (S.cfg.bustMul || 1) * slow * (1 + BUST.EXTRA * (n - 1)) * (ch.crashT > 0 ? 0.5 : 1) : far ? BUST.GALI : 0;
     if (rate > 0) { ch.bust = Math.min(1, ch.bust + rate * dt); if (ch.bust >= 1) { arrest(ch, by); if (S.over) return; } }
     else ch.bust = Math.max(0, ch.bust - BUST.DRAIN * dt);
   }
@@ -548,7 +548,7 @@ function handleEvent(e) {
   switch (e.t) {
     case 'alarm': ping(e.x, e.y, 9, '#ff4a4a'); feed(e.m, 'alarm'); sfx.alarm(); mark(); if (me.role === 'police') sfx.radio(); break;
     case 'ping': ping(e.x, e.y, 5, '#ff8a4a'); if (me.role === 'police') { feed(e.m, 'alarm'); mark(); sfx.radio(); } sfx.bell(); break;
-    case 'grab': feed(e.m, 'gold'); if (mine) sfx.grab(); break;
+    case 'grab': feed(e.m, 'gold'); if (mine) { sfx.grab(); if (!S.flags.tipGrab) { S.flags.tipGrab = 1; feed('A jeep is coming to this alarm. Drive off, or tuck into a violet door before it gets here.'); } } break;
     case 'tip': if (me.role === 'police') { ping(e.x, e.y, 6, '#ff8a4a'); feed(e.m, 'alarm'); mark(); sfx.radio(); } else if (mine) { feed('Someone called it in. The police know where you are!', 'alarm'); sfx.bell(); } break;
     case 'informer': if (me.role === 'police') { ping(e.x, e.y, 8, '#c9a0ff'); feed(e.m, 'alarm'); mark(); sfx.radio(); } else if (mine) { banner('INFORMER NE BATA DIYA!', 'red'); sfx.spotted(); } break;
     case 'bank': feed(e.m, 'good'); if (e.j) { sfx.jackpot(); if (me.role === 'police') { ping(e.x, e.y, 10, '#ff4a4a'); mark(); } } else sfx.coin(); break;
@@ -937,6 +937,7 @@ function updateHud(dt, time) {
   // inside a hideout: black bars, drained colour, and the three things that decide whether you are found
   const hiding = me.hidden >= 0 && S.screen === 'play';
   $('hideui').classList.toggle('on', hiding);
+  if (hudCache.hiding !== hiding) { hudCache.hiding = hiding; document.body.classList.toggle('hiding', hiding); }
   let hideDanger = 0;
   if (hiding) {
     const lv = S.searchLv[me.hidden] || 0, found = !!S.searchFound[me.hidden];
@@ -1060,7 +1061,7 @@ function applyQuality() {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, pixelCap)); resize();
 }
 function leaveNet() { if (S.net) { try { if (S.isHost) S.net.broadcast({ k: 'bye' }); else S.net.send({ k: 'bye' }); } catch (e) {} const n = S.net; S.net = null; setTimeout(() => { try { n.close(); } catch (e) {} }, 150); } }
-function toMenu(msg) { leaveNet(); S.isHost = true; S.solo = true; S.myId = 'h'; clearDyn(); arrow.visible = false; fx.setRain(0); S.openDoors = []; S.searchLv = {}; setScreen('menu'); refreshMenu(); $('menuErr').textContent = msg || ''; }
+function toMenu(msg) { leaveNet(); S.isHost = true; S.solo = true; S.myId = 'h'; document.body.classList.remove('hiding'); hudCache.hiding = false; clearDyn(); arrow.visible = false; fx.setRain(0); S.openDoors = []; S.searchLv = {}; setScreen('menu'); refreshMenu(); $('menuErr').textContent = msg || ''; }
 function spawnFor(role, k) {
   if (role === 'police') { const p = W.policeSpawns[k % W.policeSpawns.length]; return { x: p.x, y: p.y, a: p.a }; }
   // up to four cars per corner; a second car at the same corner starts a car-length behind the first

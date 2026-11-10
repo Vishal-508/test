@@ -85,6 +85,7 @@ kbd{font-family:ui-monospace,Menlo,monospace;font-size:.82em;background:#1b2540;
 .hb .bar{margin:0;height:7px} #hotBar{background:linear-gradient(90deg,#ffb04a,#ff4a2a)} #nearBar{background:var(--police)} #infBar{background:#c9a0ff} .hb .bar i{transition:none}
 #hideBtns{position:absolute;bottom:calc(9vh + 16px);left:50%;transform:translateX(-50%);display:flex;gap:10px;pointer-events:auto}
 #hideui:not(.on) #hideBtns{pointer-events:none}
+body.hiding #dash,body.hiding #touch,body.hiding #help,body.hiding #prompt,body.hiding #phase,body.hiding #bust{display:none!important}
 #hideBtns button{font-size:.95rem;white-space:nowrap}
 #status{font-size:.8rem;letter-spacing:.08em;min-width:74px;text-align:center} #status.hunted{color:#fff;background:#b3261e;border-color:#ff6a5a} #status.wanted{color:var(--loot)} #status.clear{color:var(--escape)} #status.hidden{color:var(--hide)}
 #paints{display:flex;gap:7px;flex-wrap:wrap} #paints button{width:30px;height:30px;border-radius:50%;padding:0;border:2px solid rgba(255,255,255,.25)} #paints button.sel{border-color:var(--loot);box-shadow:0 0 0 3px rgba(243,180,63,.35)} #paints button.locked{opacity:.3;cursor:not-allowed}
@@ -128,10 +129,13 @@ body.touch #prompt{bottom:calc(214px + var(--sab))}
 #toast.on{opacity:1}
 #loading{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:var(--bg);z-index:50;font-family:var(--display);font-size:1.3rem;color:var(--muted)}
 @media (max-width:900px){ #help{display:none} }
-@media (max-width:560px){ #mini{width:112px;height:112px} #loot{min-width:118px} #timer{font-size:1.6rem} body.touch #corner{top:calc(184px + var(--sat))}
+@media (max-width:560px){ #mini{width:112px;height:112px} #loot{min-width:104px;font-size:.86rem} #timer{font-size:1.6rem} body.touch #corner{top:calc(184px + var(--sat))}
+  #role{display:none} #wanted{min-width:0;font-size:.8rem;letter-spacing:.03em;padding:3px 8px} #status{min-width:0;font-size:.7rem;padding:3px 8px} #topbar{gap:6px}
+  body.touch #dash{left:calc(12px + var(--sal));transform:none;align-items:flex-start;bottom:calc(12px + var(--sab))} body.touch #nitro{width:110px}
+  body.hiding #mini{display:none} #hideText{white-space:normal;width:88vw;text-align:center;font-size:.92rem;letter-spacing:.08em} #hideBars{top:calc(9vh + 62px)} body.hiding.touch #corner{top:calc(9vh + 150px)}
   #feed{left:calc(10px + var(--sal));right:calc(132px + var(--sar));top:calc(104px + var(--sat));transform:none;width:auto;align-items:flex-start} #feed div{border-radius:12px;text-align:left;font-size:.86rem} #phase{max-width:120px} }
 @media (max-height:460px){ #prompt{bottom:calc(92px + var(--sab));padding:5px 12px} body.touch #prompt{bottom:auto;top:calc(96px + var(--sat))} #banner{top:24%;font-size:1.7rem} #help{display:none}
-  #mini{width:100px;height:100px;top:calc(58px + var(--sat))} body.touch #corner{top:calc(164px + var(--sat))} #corner button{font-size:.74rem;padding:.25em .6em}
+  #mini{width:100px;height:100px;top:calc(58px + var(--sat))} body.touch #corner{top:calc(84px + var(--sat));left:calc(10px + var(--sal));right:auto;flex-direction:row;gap:6px} #corner button{font-size:.72rem;padding:.25em .55em}
   .card{padding:14px;gap:9px} .title{font-size:2.1rem} .result{font-size:1.7rem} #feed{top:calc(60px + var(--sat))} #feed div{font-size:.84rem}
   #btnAct{width:78px;height:78px;bottom:calc(18px + var(--sab))} #btnNitro{width:60px;height:60px;right:calc(104px + var(--sar));bottom:calc(12px + var(--sab))} #btnBrake{width:56px;height:56px;right:calc(30px + var(--sar));bottom:calc(104px + var(--sab))}
   #bust{top:30%} #dash{bottom:calc(8px + var(--sab))} #speed b{font-size:1.8rem} }

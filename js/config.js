@@ -12,7 +12,7 @@ export const CFG = {
   CARRY_SLOW: 0.03, CARRY_SLOW_JACKPOT: 0.08,               // top speed lost per bag carried
   KMH: 26,                                                  // what one unit/second shows as on the speedometer
 
-  COP_CRUISE: 1.7, COP_RESPOND: 3.0, COP_CHASE: 3.5,
+  COP_CRUISE: 1.7, COP_RESPOND: 2.8, COP_CHASE: 3.1,   // an empty getaway car tops out at 3.4, a loaded one at about 3.2
   VISION: 12, VISION_DARK: 8, DARK_SPEED: 2.0, VISION_PARK: 0.72, FOV: 60 * Math.PI / 180, NEAR: 2.2, NOISE_RANGE: 6,
 
   // the bust meter fills while a police vehicle is within RANGE of a car going slower than VSAFE
@@ -28,7 +28,7 @@ export const CFG = {
   HIDE: {
     RANGE: 2.1, SPEED: 2.8,            // how near the door and how slow you must be to be let in
     IN: 1.5, IN_GROVE: 1.0, OUT: 0.6,  // seconds for the swing-in and the roll-out
-    COOL: 10, COOL_NITRO: 13,          // seconds until a parked engine is cold
+    COOL: 7, COOL_NITRO: 10,           // seconds until a parked engine is cold
     SEARCH: 3.0, TOUCH: 2.2,           // a search takes SEARCH seconds; the officer touches the bonnet at TOUCH
     COLD_FIND: 5.0,                    // a police player who keeps searching this long finds even a cold car
     INFORMER: 25,                      // hide this long and an informer gives your door away (not on the first night)
@@ -53,10 +53,12 @@ export function matchSetup(nChors, nHumanPolice, night) {
   if (nChors <= 1 && nHumanPolice === 0) { // solo ladder: each night is a little harder
     const n = Math.max(1, night || 1);
     return {
-      target: Math.min(800 + 150 * (n - 1), 2300),
-      cops: Math.min(2 + Math.floor((n - 1) / 2), 6),
-      speedMul: Math.min(0.92 + 0.02 * (n - 1), 1.06),
+      target: Math.min(800 + 125 * (n - 1), 2200),
+      cops: Math.min(2 + Math.floor((n - 1) / 3), 5),
+      speedMul: Math.min(0.9 + 0.015 * (n - 1), 1.02),     // jeeps are slower than you on the first nights
       visionMul: Math.min(1 + 0.03 * (n - 1), 1.25),
+      bustMul: Math.min(0.7 + 0.06 * (n - 1), 1),          // ...and the bust meter fills more gently
+      tipMul: Math.max(1, 1.5 - 0.1 * (n - 1)),            // ...and witnesses are slower to call in a loaded car
       rain: n % 3 === 0 ? 0.85 : n % 5 === 0 ? 0.5 : 0,
       informer: n >= 2,
       par: 150,
@@ -66,7 +68,7 @@ export function matchSetup(nChors, nHumanPolice, night) {
   // computer jeeps are easier to fool than a person, so one police player stands in for two of them
   const target = [0, 800, 1300, 1700, 2000, 2200, 2300, 2300, 2300][Math.min(nChors, 8)];
   const wanted = [0, 3, 3, 4, 4, 5, 5, 5, 5][Math.min(nChors, 8)];
-  return { target, cops: Math.max(0, wanted - 2 * nHumanPolice), speedMul: 1, visionMul: 1, rain: 0, informer: true, par: 150, name: '' };
+  return { target, cops: Math.max(0, wanted - 2 * nHumanPolice), speedMul: 1, visionMul: 1, bustMul: 1, tipMul: 1, rain: 0, informer: true, par: 150, name: '' };
 }
 
 export const RANKS = [

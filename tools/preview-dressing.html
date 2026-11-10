@@ -162,6 +162,8 @@ function showAtlas(on) {
   el.width = tex.image.width; el.height = tex.image.height; el.getContext('2d').drawImage(tex.image, 0, 0); el.style.display = on ? 'block' : 'none';
 }
 if (num('atlas', 0)) showAtlas(true);
+{ const b = document.createElement('button'); b.textContent = 'atlas'; b.onclick = () => showAtlas(document.getElementById('atlas').style.display !== 'block'); bar.appendChild(b); }
+{ const b = document.createElement('button'); b.textContent = 'build + dispose a 2nd copy'; b.onclick = () => { const r = window.__pv.disposeTest(); b.textContent = `2nd copy disposed: geometries ${r.before.geometries} -> ${r.after.geometries}, textures ${r.before.textures} -> ${r.after.textures}`; }; bar.appendChild(b); }
 const keys = new Set();
 addEventListener('keydown', e => { keys.add(e.key); if (e.key === 'v') { const names = Object.keys(PRESET); setView(names[(names.indexOf(state.view) + 1) % names.length]); } if (e.key === 'a') showAtlas(document.getElementById('atlas').style.display !== 'block'); });
 addEventListener('keyup', e => keys.delete(e.key));
@@ -219,8 +221,9 @@ function check() {
       out.vertices++;
       const x = p.getX(k), y = p.getY(k), z = p.getZ(k);
       if (y < 0.019 || !isFinite(x + y + z)) bad('vertex below ground', { x, y, z });
-      if (y > 0.021) { const near = [[0.08, 0], [-0.08, 0], [0, 0.08], [0, -0.08]].some(o => typeAt(x + o[0], z + o[1]) === T.BLDG); if (!near) bad('vertex away from any wall', { x, y, z }); if (typeAt(x, z) === T.BLDG) bad('vertex inside a building', { x, y, z }); }
-      else if (typeAt(x, z) !== T.WALK && typeAt(x, z) !== T.BLDG) bad('light pool off the road', { x, y, z });
+      const ring = [[0.08, 0], [-0.08, 0], [0, 0.08], [0, -0.08], [0.08, 0.08], [-0.08, 0.08], [0.08, -0.08], [-0.08, -0.08]];   // a glow may end exactly on a building's corner
+      if (y > 0.021) { if (!ring.some(o => typeAt(x + o[0], z + o[1]) === T.BLDG)) bad('vertex away from any wall', { x, y, z }); if (!ring.some(o => typeAt(x + o[0], z + o[1]) === T.WALK)) bad('vertex inside a building', { x, y, z }); }
+      else if (!ring.some(o => typeAt(x + o[0], z + o[1]) === T.WALK)) bad('light pool off the road', { x, y, z });
     }
   }
   return out;
@@ -244,6 +247,25 @@ window.__pv = {
     dressing.group.visible = false; renderer.render(scene, camera); const a = { calls: renderer.info.render.calls, tris: renderer.info.render.triangles };
     dressing.group.visible = true; renderer.render(scene, camera); const b = { calls: renderer.info.render.calls, tris: renderer.info.render.triangles };
     return { calls: b.calls - a.calls, triangles: b.tris - a.tris, textures: renderer.info.memory.textures, geometries: renderer.info.memory.geometries };
+  },
+  // face one board squarely: kind 'sign' or 'hoarding', its index, and how far back to stand
+  faceBoard(kind, i, dist) {
+    const b = (kind === 'hoarding' ? dressing.debug.hoardings : dressing.debug.signs)[i], d = dist || 2.2, y = (b.y0 + b.y1) / 2;
+    state.view = 'free'; state.mode = 'free'; state.x = b.x + b.nx * 1.0; state.y = b.z + b.nz * 1.0; state.a = Math.atan2(-b.nz, b.nx);
+    state.cam = [b.x + b.nx * d, y + d * 0.18, b.z + b.nz * d, b.x, y, b.z];
+    return b.text;
+  },
+  // face the i-th flickering sign
+  faceFlicker(i, dist) { const list = dressing.debug.signs.map((s, k) => (s.flicker ? k : -1)).filter(k => k >= 0); return this.faceBoard('sign', list[i % list.length], dist) + ' (group ' + dressing.debug.signs[list[i % list.length]].flicker + ')'; },
+  // put the car on the road behind a building that has a water tank, and the camera on the far side, so the
+  // building and its tank stand between them: with cut=1 both must open up round the car
+  behindTank(i) {
+    const typeAt = (x, z) => W.type[Math.floor(z / CS) * N + Math.floor(x / CS)];
+    const tanks = dressing.debug.roof.filter(r => r.kind === 'tank' && r.box.d <= 3 && r.box.h >= 0.8 && typeAt((r.x0 + r.x1) / 2, r.box.y - 0.6) === T.WALK);
+    const r = tanks[i % tanks.length], b = r.box, x = (r.x0 + r.x1) / 2;
+    state.view = 'free'; state.mode = 'free'; state.x = x; state.y = b.y - 0.6; state.a = Math.PI / 2;
+    state.cam = [x, b.h + 4.2, b.y + b.d + 3.2, x, 0.25, b.y - 0.6];
+    return { tanks: tanks.length, box: { x: b.x, y: b.y, w: b.w, d: b.d, h: b.h } };
   },
   atlasDataUrl() { const tex = dressing && dressing.group.children[0] && dressing.group.children[0].material.map; return tex ? tex.image.toDataURL('image/png') : null; },
   flickerLevels(t) { dressing.update(0.016, t); return dressing.group.children.filter(m => !m.isInstancedMesh && m.renderOrder === 3).map(m => +m.material.color.r.toFixed(2)); },
