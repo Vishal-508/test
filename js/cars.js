@@ -3,8 +3,16 @@
 // the light pools, shadow, livery and reflections). Geometry and textures are built once and shared
 // by every car of a kind; each car owns only its materials and its four wheel instances.
 //
+//   import { PAINTS, makeCar } from './cars.js';
+//   const car = makeCar('chor', { paint: PAINTS[0].hex });      // or makeCar('police')
+//   scene.add(car.g); car.g.position.set(x, 0, z); car.g.rotation.y = heading;
+//   car.update(state, dt, time);                                 // every frame, seconds
+//   car.dispose();                                               // when the car leaves
+//
 // Conventions: X = east, Z = south, Y = up, 1 unit = 5 m. Models face +Z and stand on y = 0.
 // In this right-handed frame the car's LEFT flank is +X and its RIGHT flank is -X.
+// Footprints (collision uses them): getaway car 0.84 long x 0.38 wide x 0.27 tall, jeep 0.86 x 0.42 x 0.36
+// (0.40 with the light bar).
 import * as THREE from '../vendor/three.module.min.js';
 
 // Getaway-car paints: moody ones first, then the loud ones.
@@ -22,10 +30,9 @@ export const PAINTS = [
 const HAS_DOM = typeof document !== 'undefined';
 const TAU = Math.PI * 2;
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
-const ease = (dt, rate) => 1 - Math.exp(-dt * rate);
 const smooth = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
 
-// scratch objects, so update() never allocates
+// scratch objects for the geometry builders
 const _m = new THREE.Matrix4(), _p = new THREE.Vector3(), _v = new THREE.Vector3(), _s = new THREE.Vector3(1, 1, 1);
 const _q = new THREE.Quaternion(), _e = new THREE.Euler(), _c = new THREE.Color();
 
@@ -160,7 +167,7 @@ function pane(bp, bg, bl, br, tr, tl, ml, mr, mb, mt, col, ref) {
 }
 // The cabin: a tapered box of framed windows over a dark interior block, plus a roof slab.
 // G: { yB, yT, zF, zR, hwB, zFt, zRt, hwT } (base and top rectangles), side: [[u0, u1, ml, mr], ...] from the rear forwards.
-function greenhouse(paint, trim, glass, G, front, rear, side, sideMb, sideMt, roof, col, dark) {
+function greenhouse(paint, trim, glass, G, front, rear, side, sideMb, sideMt, roof, col, dark, roofCol) {
   const ref = [0, (G.yB + G.yT) / 2, (G.zF + G.zR) / 2];
   const fbl = [G.hwB, G.yB, G.zF], fbr = [-G.hwB, G.yB, G.zF], ftr = [-G.hwT, G.yT, G.zFt], ftl = [G.hwT, G.yT, G.zFt];
   const rbl = [-G.hwB, G.yB, G.zR], rbr = [G.hwB, G.yB, G.zR], rtr = [G.hwT, G.yT, G.zRt], rtl = [-G.hwT, G.yT, G.zRt];
@@ -181,17 +188,18 @@ function greenhouse(paint, trim, glass, G, front, rear, side, sideMb, sideMt, ro
     section(G.zFt + R.over - 0.014, R.hw, R.yb, R.yt, 0.004, 0.006, R.crown, 0),
     section(G.zRt - R.over + 0.014, R.hw, R.yb, R.yt, 0.004, 0.006, R.crown, 0),
     section(G.zRt - R.over, R.hw - 0.006, R.yb, R.yt - 0.004, 0.003, 0.004, R.crown * 0.5, 0)];
-  loft(paint, rings, col, (R.yb + R.yt) / 2); cap(paint, rings[0], col, 1); cap(paint, rings[3], col, -1);
+  const rc = roofCol || col;
+  loft(paint, rings, rc, (R.yb + R.yt) / 2); cap(paint, rings[0], rc, 1); cap(paint, rings[3], rc, -1);
 }
 // A wheel with its axle along X: tyre, steel rim, hub cap and four dark slots so the spin can be seen.
 function buildWheel(r, w, rimHex, capHex) {
   const b = newB(), rubber = lin(0x0b0b0d), rim = lin(rimHex), hub = lin(capHex), slot = lin(0x050506);
   cyl(b, r, r, w, 16, 0, 0, 0, rubber, 'x');
   cyl(b, r * 0.64, r * 0.64, w + 0.004, 12, 0, 0, 0, rim, 'x');
-  cyl(b, r * 0.26, r * 0.26, w + 0.009, 8, 0, 0, 0, hub, 'x');
+  cyl(b, r * 0.26, r * 0.26, w + 0.005, 8, 0, 0, 0, hub, 'x');
   for (let k = 0; k < 4; k++) {
     const a = Math.PI / 4 + k * Math.PI / 2;
-    box(b, w + 0.006, r * 0.15, r * 0.2, 0, Math.cos(a) * r * 0.45, Math.sin(a) * r * 0.45, slot, a, 0, 0);
+    box(b, w + 0.0046, r * 0.15, r * 0.2, 0, Math.cos(a) * r * 0.45, Math.sin(a) * r * 0.45, slot, a, 0, 0);
   }
   return finish(b, { crease: 0.5 });
 }
@@ -204,6 +212,7 @@ function groundQuad(o, x, y, z, wid, len, ang, u0, v0, u1, v1) {
   o.uv.push(u0, v0, u1, v0, u1, v1, u0, v1);
   o.i.push(i, i + 2, i + 1, i, i + 3, i + 2);
 }
+// Indexed geometry with uvs from the collected quads.
 function fxGeometry(o) {
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(o.p), 3));
@@ -215,16 +224,18 @@ function fxGeometry(o) {
 // Where things sit in the 256 x 256 effect atlas (uv rectangles, inset a little against bleeding).
 const UV_BEAM = [0.004, 0.004, 0.496, 0.996], UV_BLOB = [0.504, 0.504, 0.996, 0.996], UV_FLAME = [0.504, 0.004, 0.746, 0.496];
 
+// The flat effect meshes of one kind of car: shadow, headlight pools, tail glow, siren glow and exhaust flames.
 function buildFx(K) {
+  K.headCol = new THREE.Color(K.headOn).multiplyScalar(HEAD_BOOST);
   let o = { p: [], uv: [], i: [] };
   groundQuad(o, 0, 0.011, -K.shadow[1] / 2, K.shadow[0], K.shadow[1], 0, 0, 0, 1, 1);
   K.shadowGeo = fxGeometry(o);
   // two headlight pools, toed out a touch so they overlap into a brighter middle
   o = { p: [], uv: [], i: [] };
-  for (const sx of [1, -1]) groundQuad(o, sx * K.lampX, 0.02, K.front - 0.05, 1.5, 3.45, sx * 0.07, UV_BEAM[0], UV_BEAM[1], UV_BEAM[2], UV_BEAM[3]);
+  for (const sx of [1, -1]) groundQuad(o, sx * K.lampX, 0.02, K.front - 0.05, 2.3, 3.45, sx * 0.04, UV_BEAM[0], UV_BEAM[1], UV_BEAM[2], UV_BEAM[3]);
   K.poolGeo = fxGeometry(o);
   o = { p: [], uv: [], i: [] };
-  groundQuad(o, 0, 0.021, -K.front - 0.72, 1.05, 0.9, 0, UV_BLOB[0], UV_BLOB[1], UV_BLOB[2], UV_BLOB[3]);
+  groundQuad(o, 0, 0.021, -K.front - 0.64, 1.1, 1.0, 0, UV_BLOB[0], UV_BLOB[1], UV_BLOB[2], UV_BLOB[3]);   // behind the tail: brake, reverse and nitro glow
   K.tailGlowGeo = fxGeometry(o);
   o = { p: [], uv: [], i: [] };
   groundQuad(o, 0, 0.022, -1.6, 3.2, 3.2, 0, UV_BLOB[0], UV_BLOB[1], UV_BLOB[2], UV_BLOB[3]);
@@ -240,9 +251,6 @@ function buildFx(K) {
     o.p.push(x, y - 0.04, 0, x, y + 0.04, 0, x, y + 0.04, -L, x, y - 0.04, -L);
     o.uv.push(f[0], f[1], f[2], f[1], f[2], f[3], f[0], f[3]); o.i.push(i, i + 1, i + 2, i, i + 2, i + 3);
   }
-  const i = o.p.length / 3;                                             // warm glow thrown on the road
-  o.p.push(-0.38, 0.021, 0.08, 0.38, 0.021, 0.08, 0.38, 0.021, -0.68, -0.38, 0.021, -0.68);
-  o.uv.push(UV_BLOB[0], UV_BLOB[1], UV_BLOB[2], UV_BLOB[1], UV_BLOB[2], UV_BLOB[3], UV_BLOB[0], UV_BLOB[3]); o.i.push(i, i + 2, i + 1, i, i + 3, i + 2);
   K.flameGeo = fxGeometry(o);
 }
 
@@ -250,7 +258,7 @@ function buildFx(K) {
 // A small three-box saloon of no particular make: round lamps, chrome bumpers, upright rear window.
 function buildChor() {
   const paint = newB(), trim = newB(), glass = newB(), head = newB(), tail = newB(), rev = newB();
-  const W = [1, 1, 1], HW = 0.186, WX = 0.166, WZ = 0.255, WR = 0.058;
+  const W = [1, 1, 1], SHUT = [0.3, 0.3, 0.3], HW = 0.186, WX = 0.166, WZ = 0.255, WR = 0.058;
   const chrome = lin(0x9da3ad), black = lin(0x0b0c0f), dark = lin(0x16181c), cabin = lin(0x050608), amber = lin(0x8f4a0c), plate = lin(0xc9c7ba), steel = lin(0x4d5158);
 
   const rings = [
@@ -268,13 +276,13 @@ function buildChor() {
     [0.07, 0.07, 0.10], [0.09, 0.10, 0.13],
     [[0, 0.5, 0.22, 0.05], [0.5, 1, 0.05, 0.17]], 0.08, 0.12,
     { hw: 0.154, yb: 0.2545, yt: 0.266, crown: 0.004, over: 0.008 }, W, cabin);
-  for (const sx of [1, -1]) box(paint, 0.014, 0.014, 0.02, sx * 0.186, 0.173, 0.132, W);          // wing mirrors
+  for (const sx of [1, -1]) box(paint, 0.012, 0.014, 0.02, sx * 0.184, 0.173, 0.132, W);          // wing mirrors
 
   // bumpers, grille, lamps' surrounds
   for (const sz of [1, -1]) {
     box(trim, 0.352, 0.022, 0.02, 0, 0.069, sz * 0.409, chrome);
     for (const sx of [1, -1]) {
-      box(trim, 0.014, 0.022, 0.036, sx * 0.178, 0.069, sz * 0.396, chrome, 0, sx * sz * 0.5, 0);
+      box(trim, 0.014, 0.022, 0.036, sx * 0.176, 0.069, sz * 0.396, chrome, 0, sx * sz * 0.5, 0);
       box(trim, 0.012, 0.034, 0.008, sx * 0.075, 0.073, sz * 0.4175, dark);
     }
   }
@@ -290,7 +298,8 @@ function buildChor() {
     box(trim, 0.076, 0.033, 0.004, sx * 0.118, 0.127, -0.4045, black);
     // side furniture: rub strip, door shuts, handles, wheel arches
     box(trim, 0.003, 0.006, 0.31, sx * 0.1865, 0.106, 0, dark);
-    for (const z of [0.136, -0.046, -0.218]) box(trim, 0.002, 0.082, 0.004, sx * 0.1855, 0.116, z, dark);
+    box(trim, 0.004, 0.007, 0.4, sx * 0.1775, 0.166, -0.052, chrome);
+    for (const z of [0.136, -0.046, -0.218]) box(paint, 0.002, 0.082, 0.005, sx * 0.1855, 0.116, z, SHUT);
     for (const z of [0.02, -0.16]) box(trim, 0.003, 0.005, 0.022, sx * 0.1855, 0.143, z, chrome);
     for (const z of [WZ, -WZ]) arch(trim, 0.073, sx * (HW + 0.0009), WR, z, black);
     cyl(trim, 0.0075, 0.0075, 0.03, 8, sx * 0.08, 0.052, -0.404, steel, 'z');
@@ -303,20 +312,22 @@ function buildChor() {
   const K = {
     paint: finish(paint, { ao: [0.045, 0.13, 0.5] }), trim: finish(trim, { ao: [0.04, 0.1, 0.7] }), glass: finish(glass, { colors: false }),
     head: finish(head, { colors: false }), tail: finish(tail, { colors: false }), rev: finish(rev, { colors: false }),
-    wheel: buildWheel(WR, 0.048, 0x565a62, 0xa6abb4), wheelR: WR, wheels: [[WX, WZ], [-WX, WZ], [WX, -WZ], [-WX, -WZ]],
+    wheel: buildWheel(WR, 0.044, 0x565a62, 0xa6abb4), wheelR: WR, wheels: [[WX, WZ], [-WX, WZ], [WX, -WZ], [-WX, -WZ]],
     front: 0.42, lampX: 0.125, shadow: [0.58, 1.06], pipes: [0.08, -0.08], pipeY: 0.052,
-    headOn: 0xffefc2, poolTint: 0xffe2a8, poolGain: 0.5, roll: 0.085, pitch: 0.0085,
+    headOn: 0xffefc2, poolTint: 0xffe2a8, poolGain: 0.45, roll: 0.085, pitch: 0.0085,
   };
   buildFx(K);
   return K;
 }
 
 // ---------------------------------------------------------------- the police jeep
-// A tall, square 4x4 in white with blue panels, a roof light bar, bull bar and a spare wheel on the tailgate.
-const POLICE_WHITE = 0xc6ccd6, POLICE_BLUE = 0x17357f;
+// A tall, square 4x4: white flanks, blue bonnet, roof and door bands, a roof light bar, bull bar and a spare wheel
+// on the tailgate. The upward-facing panels are the dark colour on purpose: a siren light hung just above the roof
+// would burn a white roof out to a blank glare.
+const POLICE_WHITE = 0xb9c0cb, POLICE_BLUE = 0x17357f;
 function buildPolice() {
   const paint = newB(), trim = newB(), glass = newB(), head = newB(), tail = newB(), rev = newB(), barR = newB(), barB = newB();
-  const W = lin(POLICE_WHITE), BL = lin(POLICE_BLUE), HW = 0.198, WX = 0.179, WZ = 0.262, WR = 0.075;
+  const W = lin(POLICE_WHITE), BL = lin(POLICE_BLUE), SHUT = W.map(v => v * 0.35), HW = 0.198, WX = 0.179, WZ = 0.262, WR = 0.075;
   const black = lin(0x0b0c0f), dark = lin(0x1b1d22), cabin = lin(0x050608), amber = lin(0x8f4a0c), plate = lin(0xc9c7ba), grey = lin(0x7b808a), steel = lin(0x3c4046);
 
   const rings = [
@@ -332,7 +343,7 @@ function buildPolice() {
     { yB: 0.212, yT: 0.345, zF: 0.136, zR: -0.398, hwB: 0.192, zFt: 0.088, zRt: -0.386, hwT: 0.178 },
     [0.07, 0.08, 0.10], [0.13, 0.40, 0.12],
     [[0, 0.3, 0.2, 0.09], [0.3, 0.66, 0.06, 0.06], [0.66, 1, 0.06, 0.15]], 0.10, 0.12,
-    { hw: 0.182, yb: 0.342, yt: 0.356, crown: 0.003, over: 0.010 }, W, cabin);
+    { hw: 0.182, yb: 0.342, yt: 0.356, crown: 0.003, over: 0.010 }, W, cabin, BL);
 
   // front: bumper, bull bar, grille, lamp surrounds
   box(trim, 0.40, 0.034, 0.03, 0, 0.106, 0.413, dark);
@@ -344,8 +355,8 @@ function buildPolice() {
   box(trim, 0.078, 0.02, 0.003, 0, 0.106, 0.4295, plate);
   // back: bumper, spare wheel, plate
   box(trim, 0.40, 0.03, 0.026, 0, 0.1, -0.414, dark);
-  cyl(trim, 0.066, 0.066, 0.03, 14, 0, 0.194, -0.418, black, 'z');
-  cyl(trim, 0.034, 0.034, 0.034, 10, 0, 0.194, -0.418, grey, 'z');
+  cyl(trim, 0.066, 0.066, 0.028, 14, 0, 0.194, -0.416, black, 'z');
+  cyl(trim, 0.034, 0.034, 0.032, 10, 0, 0.194, -0.416, grey, 'z');
   box(trim, 0.078, 0.02, 0.003, 0, 0.1, -0.4285, plate);
   for (const sx of [1, -1]) {
     cyl(trim, 0.03, 0.03, 0.007, 12, sx * 0.138, 0.168, 0.4105, black, 'z');
@@ -356,8 +367,8 @@ function buildPolice() {
     // flanks: flares over the wheels, running board, mirror, door shuts and handles
     for (const z of [WZ, -WZ]) { arch(trim, 0.093, sx * (HW + 0.0009), WR, z, black); box(trim, 0.016, 0.012, 0.2, sx * 0.203, 0.171, z, black); }
     box(trim, 0.022, 0.012, 0.3, sx * 0.2, 0.09, 0, black);
-    box(trim, 0.016, 0.03, 0.022, sx * 0.207, 0.236, 0.118, black);
-    for (const z of [0.132, -0.06, -0.25]) box(trim, 0.002, 0.11, 0.004, sx * 0.1975, 0.158, z, dark);
+    box(trim, 0.014, 0.03, 0.022, sx * 0.203, 0.236, 0.118, black);
+    for (const z of [0.132, -0.06, -0.25]) box(paint, 0.002, 0.11, 0.005, sx * 0.1975, 0.158, z, SHUT);
     for (const z of [0.0, -0.19]) box(trim, 0.003, 0.006, 0.024, sx * 0.1985, 0.197, z, black);
     box(trim, 0.01, 0.008, 0.4, sx * 0.164, 0.3615, -0.15, black);                                   // roof rails
   }
@@ -382,7 +393,7 @@ function buildPolice() {
     barR: finish(barR, { colors: false }), barB: finish(barB, { colors: false }), decal,
     wheel: buildWheel(WR, 0.06, 0x34373c, 0x8a8f98), wheelR: WR, wheels: [[WX, WZ], [-WX, WZ], [WX, -WZ], [-WX, -WZ]],
     front: 0.43, lampX: 0.138, shadow: [0.64, 1.1], pipes: [-0.12], pipeY: 0.092,
-    headOn: 0xf4f6ff, poolTint: 0xe6ecff, poolGain: 0.5, roll: 0.1, pitch: 0.0095,
+    headOn: 0xf4f6ff, poolTint: 0xe6ecff, poolGain: 0.45, roll: 0.1, pitch: 0.0095,
   };
   buildFx(K);
   return K;
@@ -397,11 +408,11 @@ function paintAtlas() {
   const S = 256, cv = canvas(S, S), ctx = cv.getContext('2d'), im = ctx.createImageData(S, S), d = im.data;
   const put = (x, y, r, g, b) => { const k = (y * S + x) * 4; d[k] = r * 255; d[k + 1] = g * 255; d[k + 2] = b * 255; };
   for (let k = 3; k < d.length; k += 4) d[k] = 255;
-  for (let y = 0; y < 256; y++) for (let x = 0; x < 128; x++) {         // beam: narrow and hot at the car, wide and faint far away
-    const u = Math.abs((x + 0.5) / 64 - 1), v = 1 - (y + 0.5) / 256, hw = 0.1 + 0.8 * Math.pow(v, 0.85);
-    const across = Math.exp(-(u * u) / (hw * hw) * 2.3) * smooth(1, 0.78, u);
-    const along = smooth(0, 0.07, v) * Math.pow(1 - v, 1.6) * (0.32 + 0.68 * 0.2 / (0.2 + v));
-    const a = Math.min(1, across * along * 1.5);
+  for (let y = 0; y < 256; y++) for (let x = 0; x < 128; x++) {         // beam: a fan of light, brightest a little ahead of the car
+    const u = Math.abs((x + 0.5) / 64 - 1), v = 1 - (y + 0.5) / 256, hw = 0.12 + 0.82 * Math.pow(v, 0.9);
+    const across = Math.exp(-Math.pow(u / hw, 2.4) * 1.5) * smooth(1, 0.82, u);
+    const along = smooth(0, 0.08, v) * Math.pow(1 - v, 1.2) * (0.42 + 0.58 * 0.3 / (0.3 + v));
+    const a = Math.min(1, across * along * 1.3);
     put(x, y, a, a, a);
   }
   for (let y = 0; y < 128; y++) for (let x = 0; x < 128; x++) {         // round glow
@@ -457,8 +468,8 @@ function paintEnv() {
     c.fillStyle = q; c.fillRect(x - r, y - r, 2 * r, 2 * r);
   };
   glow(178, 26, 22, 'rgba(110,130,200,0.4)'); glow(178, 26, 6, 'rgba(240,244,255,1)');        // moon
-  const lamps = [[14, 57, '255,190,110'], [47, 54, '255,176,96'], [83, 58, '255,95,160'], [112, 55, '255,200,130'],
-    [139, 58, '110,220,255'], [203, 56, '255,184,104'], [229, 53, '255,205,140'], [246, 58, '150,255,190']];
+  const lamps = [[14, 57, '255,190,110'], [47, 54, '255,176,96'], [83, 58, '255,150,170'], [112, 55, '255,200,130'],
+    [139, 58, '170,220,255'], [203, 56, '255,184,104'], [229, 53, '255,205,140'], [246, 58, '255,196,120']];
   for (const [x, y, rgb] of lamps) { glow(x, y, 9, `rgba(${rgb},0.45)`); glow(x, y, 3, `rgba(${rgb},1)`); }
   return cv;
 }
@@ -481,16 +492,22 @@ function textures() {
 const KITS = { chor: null, police: null };
 const kitFor = kind => KITS[kind] || (KITS[kind] = kind === 'police' ? buildPolice() : buildChor());
 
-// lamp colours (linear), shared and read-only
-const col = hex => new THREE.Color(hex);
-const C_HEAD_OFF = col(0x15171b), C_TAIL_OFF = col(0x1c0608), C_TAIL_DIM = col(0x8e1418), C_TAIL_ON = col(0xff3a2c);
-const C_REV_OFF = col(0x17181a), C_REV_ON = col(0xfdfdf4), C_BAR_OFF = col(0x1e2533);
-const C_RED_ON = col(0xff3a3a), C_RED_DIM = col(0x4a0a10), C_BLUE_ON = col(0x4d7dff), C_BLUE_DIM = col(0x0c163f);
+// Lamp colours, shared and read-only. The game tone-maps the frame (ACES) and blooms only what is brighter than
+// white, so lamps that should glow are given linear values above 1. The brake red stays near 1: pushed harder,
+// ACES turns red to orange.
+const col = hex => new THREE.Color(hex), rgb = (r, g, b) => new THREE.Color().setRGB(r, g, b);
+const C_HEAD_OFF = col(0x15171b), C_TAIL_OFF = col(0x1c0608), C_TAIL_DIM = rgb(0.2, 0.0, 0.004), C_TAIL_ON = rgb(1.0, 0.0, 0.03);
+const C_REV_OFF = col(0x17181a), C_REV_ON = rgb(1.7, 1.7, 1.6), C_BAR_OFF = col(0x1e2533);
+const C_RED_ON = rgb(4.6, 0.02, 0.25), C_RED_DIM = col(0x4a0a10), C_BLUE_ON = rgb(0.25, 0.9, 6.0), C_BLUE_DIM = col(0x0c163f);
+const C_GLOW_RED = rgb(0.6, 0.04, 0.05), C_GLOW_BLUE = rgb(0.05, 0.14, 0.62);
+const HEAD_BOOST = 2.0;
 const NO_STATE = {};
 
 // ---------------------------------------------------------------- public: build a car
 // makeCar('chor' | 'police', { paint: 0xRRGGBB }) -> { g, kind, update(state, dt, time), dispose(), setPaint(hex) }.
 // g is a THREE.Group facing +Z, centred on the origin, wheels on y = 0. Call update() every frame.
+// opts.paint colours the getaway car (the jeep keeps its livery). opts.reflect === false leaves out the
+// night-sky reflection map (three.js blurs it once into a half-float texture the first time a car is drawn).
 export function makeCar(kind, opts) {
   kind = kind === 'police' ? 'police' : 'chor';
   const K = kitFor(kind), T = textures(), police = kind === 'police';
@@ -501,20 +518,20 @@ export function makeCar(kind, opts) {
   g.add(root); root.add(body);
 
   // materials (all owned by this car: they carry its paint, its lamp state and its ghost alpha)
-  const std = p => new THREE.MeshStandardMaterial(Object.assign({ envMap: T.env }, p));
+  const std = p => new THREE.MeshStandardMaterial(Object.assign({ envMap: opts && opts.reflect === false ? null : T.env }, p));
   const lamp = c => new THREE.MeshBasicMaterial({ color: c });
   const glow = (c, side) => new THREE.MeshBasicMaterial({ color: c, map: T.atlas, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false, side: side || THREE.FrontSide });
   const M = {
-    paint: std({ color: paintHex, metalness: 0.5, roughness: 0.38, vertexColors: true, envMapIntensity: 1.6 }),
+    paint: std({ color: paintHex, metalness: 0.5, roughness: 0.38, vertexColors: true, envMapIntensity: 2.0 }),
     trim: std({ color: 0xffffff, metalness: 0.35, roughness: 0.55, vertexColors: true, envMapIntensity: 1.0 }),
-    glass: std({ color: 0x0a1018, metalness: 0.75, roughness: 0.1, transparent: true, opacity: 0.86, depthWrite: false, envMapIntensity: 2.2 }),
+    glass: std({ color: 0x0a1018, metalness: 0.7, roughness: 0.22, transparent: true, opacity: 0.86, depthWrite: false, envMapIntensity: 1.5 }),
     head: lamp(C_HEAD_OFF), tail: lamp(C_TAIL_OFF), rev: lamp(C_REV_OFF),
     shadow: new THREE.MeshBasicMaterial({ color: 0x000000, map: T.shadow, transparent: true, opacity: 0.62, depthWrite: false }),
     pools: glow(K.poolTint), tailGlow: glow(0x000000), flame: glow(0xffffff, THREE.DoubleSide),
   };
   if (police) {
     M.barR = lamp(C_BAR_OFF); M.barB = lamp(C_BAR_OFF);
-    M.decal = std({ color: 0xffffff, map: T.police, metalness: 0.5, roughness: 0.38, envMapIntensity: 1.6 });
+    M.decal = std({ color: 0xffffff, map: T.police, metalness: 0.5, roughness: 0.38, envMapIntensity: 2.0 });
     M.siren = glow(0x000000);
   }
   // the solid parts, with what to restore when the car stops being a ghost
@@ -532,14 +549,24 @@ export function makeCar(kind, opts) {
   const flame = mesh(K.flameGeo, M.flame, root); flame.position.z = -K.front + 0.02;
   pools.visible = tailGlow.visible = flame.visible = false; if (siren) siren.visible = false;
   if (!T.shadow) shadow.visible = false;
+  const fx = !!T.atlas;
 
-  const st = { spin: 0, yaw: 0, roll: 0, pitch: 0, acc: 0, prev: 0, first: true, head: 0, tail: 0, brake: 0, rev: 0, nitro: 0, alpha: 1, wSpin: NaN, wYaw: NaN, phase: Math.random() * 10 };
+  const st = { spin: 0, yaw: 0, roll: 0, pitch: 0, acc: 0, prev: 0, first: true, head: 0, tail: 0, brake: 0, rev: 0, nitro: 0, alpha: 1, wSpin: 0, wYaw: 0, phase: Math.random() * 10 };
 
+  // The body and the wheels are posed by writing their matrices directly, and update() does its own arithmetic
+  // instead of calling maths helpers: nothing is allocated per frame, whatever the JavaScript engine decides to inline.
+  body.matrixAutoUpdate = false;
+  const bm = body.matrix.elements, wm = wheels.instanceMatrix.array;
+
+  // Wheel k sits at its hub, turned by Ry(steering yaw) * Rx(spin); only the front pair (0 and 1) steers.
   function placeWheels() {
-    for (let k = 0; k < 4; k++) {
-      _q.setFromEuler(_e.set(st.spin, k < 2 ? st.yaw : 0, 0, 'YXZ'));
-      _m.compose(_p.set(K.wheels[k][0], K.wheelR, K.wheels[k][1]), _q, _s.set(1, 1, 1));
-      wheels.setMatrixAt(k, _m);
+    const cs = Math.cos(st.spin), sn = Math.sin(st.spin), cy = Math.cos(st.yaw), sy = Math.sin(st.yaw);
+    for (let k = 0, o = 0; k < 4; k++, o += 16) {
+      const c = k < 2 ? cy : 1, s = k < 2 ? sy : 0;
+      wm[o] = c; wm[o + 1] = 0; wm[o + 2] = -s; wm[o + 3] = 0;
+      wm[o + 4] = s * sn; wm[o + 5] = cs; wm[o + 6] = c * sn; wm[o + 7] = 0;
+      wm[o + 8] = s * cs; wm[o + 9] = -sn; wm[o + 10] = c * cs; wm[o + 11] = 0;
+      wm[o + 12] = K.wheels[k][0]; wm[o + 13] = K.wheelR; wm[o + 14] = K.wheels[k][1]; wm[o + 15] = 1;
     }
     wheels.instanceMatrix.needsUpdate = true; st.wSpin = st.spin; st.wYaw = st.yaw;
   }
@@ -559,63 +586,84 @@ export function makeCar(kind, opts) {
   }
 
   // Per-frame animation. state = { speed, steer, brake, lights, siren, nitro, hidden, alpha }; dt and time in seconds.
-  // steer follows js/vehicle.js: positive steer is the direction in which the heading angle grows.
+  // steer is positive for a right turn, as in js/vehicle.js (heading angle falling): the front wheels then point towards -X.
+  // Missing fields are treated as 0 / false / alpha 1, but pass one complete state object, reused from frame to
+  // frame: then nothing here allocates.
   function update(state, dt, time) {
-    const s = state || NO_STATE, t = +time || 0;
-    dt = dt > 0 ? Math.min(dt, 0.1) : 0;
-    const speed = +s.speed || 0, steer = clamp(+s.steer || 0, -1, 1), live = !s.hidden;
-    const alpha = s.alpha == null ? 1 : clamp(+s.alpha, 0, 1);
+    const s = state || NO_STATE, live = !s.hidden;
+    let t = +time, speed = +s.speed, steer = +s.steer, alpha = s.alpha == null ? 1 : +s.alpha;
+    if (!(t > -1e9 && t < 1e9)) t = 0;                                   // a missing or wild number counts as zero
+    if (!(speed > -20)) speed = speed < 0 ? -20 : 0; else if (speed > 20) speed = 20;
+    if (steer !== steer) steer = 0; else if (steer > 1) steer = 1; else if (steer < -1) steer = -1;
+    alpha = alpha < 1 ? (alpha > 0 ? alpha : 0) : 1;
+    dt = dt > 0 ? (dt < 0.1 ? dt : 0.1) : 0;
     if (alpha !== st.alpha) setAlpha(alpha);
+    const kBody = 1 - Math.exp(-dt * 7), kLamp = 1 - Math.exp(-dt * 18), kBrake = 1 - Math.exp(-dt * 26);   // easing per frame
 
-    // wheels: roll with the road, front pair turns with the steering
+    // wheels: roll with the road, front pair turns with the steering (right is -X, so a right turn is a negative yaw)
     st.spin = (st.spin + speed / K.wheelR * dt) % TAU;
-    st.yaw += (steer * 0.5 - st.yaw) * ease(dt, 16);
-    if (Math.abs(st.spin - st.wSpin) > 1e-4 || Math.abs(st.yaw - st.wYaw) > 1e-4 || st.wSpin !== st.wSpin) placeWheels();
+    st.yaw += (-steer * 0.5 - st.yaw) * kLamp;
+    if (Math.abs(st.spin - st.wSpin) > 1e-4 || Math.abs(st.yaw - st.wYaw) > 1e-4) placeWheels();
 
-    // body: leans out of a bend, squats under power, dives under braking, trembles a little at idle
+    // body: leans out of a bend (right turn: the left, +X, side dips), squats under power, dives under braking,
+    // trembles a little while the engine runs
     if (st.first) { st.prev = speed; st.first = false; }
-    if (dt > 0) st.acc += (clamp((speed - st.prev) / dt, -9, 9) - st.acc) * ease(dt, 7);
+    if (dt > 0) { let a = (speed - st.prev) / dt; a = a > 9 ? 9 : a < -9 ? -9 : a; st.acc += (a - st.acc) * kBody; }
     st.prev = speed;
-    const grip = Math.min(1, Math.abs(speed) / 2.6);
-    st.roll += (steer * grip * K.roll - st.roll) * ease(dt, 6);
-    st.pitch += (clamp(-st.acc * K.pitch, -0.045, 0.06) - (s.nitro && live ? 0.012 : 0) - st.pitch) * ease(dt, 7);
-    body.rotation.z = st.roll; body.rotation.x = st.pitch;
-    body.position.y = live ? Math.sin(t * 71 + st.phase) * 0.0011 * (1 - 0.6 * grip) + Math.sin(t * 23 + st.phase) * 0.0012 * grip : 0;
+    let grip = Math.abs(speed) / 2.6; if (grip > 1) grip = 1;
+    st.roll += (-steer * grip * K.roll - st.roll) * kBody;
+    let pitch = -st.acc * K.pitch; pitch = pitch > 0.06 ? 0.06 : pitch < -0.045 ? -0.045 : pitch;
+    if (live && s.nitro) pitch -= 0.012;
+    st.pitch += (pitch - st.pitch) * kBody;
+    const cr = Math.cos(st.roll), sr = Math.sin(st.roll), cp = Math.cos(st.pitch), sp = Math.sin(st.pitch);
+    bm[0] = cr; bm[1] = cp * sr; bm[2] = sp * sr; bm[4] = -sr; bm[5] = cp * cr; bm[6] = sp * cr; bm[9] = -sp; bm[10] = cp;   // Rx(pitch) * Rz(roll)
+    bm[13] = live ? Math.sin(t * 71 + st.phase) * 0.0011 * (1 - 0.6 * grip) + Math.sin(t * 23 + st.phase) * 0.0012 * grip : 0;
+    body.matrixWorldNeedsUpdate = true;
 
-    // lamps
-    st.head += ((live && s.lights ? 1 : 0) - st.head) * ease(dt, 18);
-    st.tail += ((live ? (s.lights ? 1 : 0.45) : 0) - st.tail) * ease(dt, 18);
-    st.brake += ((live && s.brake ? 1 : 0) - st.brake) * ease(dt, 26);
-    st.rev += ((live && speed < -0.1 ? 1 : 0) - st.rev) * ease(dt, 18);
-    M.head.color.copy(C_HEAD_OFF).lerp(_c.setHex(K.headOn), st.head);
-    M.tail.color.copy(C_TAIL_OFF).lerp(C_TAIL_DIM, st.tail).lerp(C_TAIL_ON, st.brake);
-    M.rev.color.copy(C_REV_OFF).lerp(C_REV_ON, st.rev);
-    pools.visible = st.head * alpha > 0.01;
-    M.pools.opacity = st.head * alpha * K.poolGain;
-    const back = Math.max(st.brake, st.rev * 0.5);
-    tailGlow.visible = back * alpha > 0.02;
-    if (tailGlow.visible) { M.tailGlow.color.setRGB(st.brake * 0.55 + st.rev * 0.2, st.brake * 0.05 + st.rev * 0.2, st.brake * 0.04 + st.rev * 0.18); M.tailGlow.opacity = alpha; }
+    // lamps: each level eases towards its target, then the lens colours are mixed from them
+    st.head += ((live && s.lights ? 1 : 0) - st.head) * kLamp;
+    st.tail += ((live ? (s.lights ? 1 : 0.45) : 0) - st.tail) * kLamp;
+    st.brake += ((live && s.brake ? 1 : 0) - st.brake) * kBrake;
+    st.rev += ((live && speed < -0.1 ? 1 : 0) - st.rev) * kLamp;
+    st.nitro += ((live && s.nitro ? 1 : 0) - st.nitro) * kLamp;
+    const hd = st.head, tl = st.tail, bk = st.brake, rv = st.rev, HN = K.headCol;
+    let c = M.head.color;
+    c.r = C_HEAD_OFF.r + (HN.r - C_HEAD_OFF.r) * hd; c.g = C_HEAD_OFF.g + (HN.g - C_HEAD_OFF.g) * hd; c.b = C_HEAD_OFF.b + (HN.b - C_HEAD_OFF.b) * hd;
+    c = M.tail.color;                                                   // off -> dim red with the lights, -> bright with the brake
+    const tr = C_TAIL_OFF.r + (C_TAIL_DIM.r - C_TAIL_OFF.r) * tl, tg = C_TAIL_OFF.g + (C_TAIL_DIM.g - C_TAIL_OFF.g) * tl, tb = C_TAIL_OFF.b + (C_TAIL_DIM.b - C_TAIL_OFF.b) * tl;
+    c.r = tr + (C_TAIL_ON.r - tr) * bk; c.g = tg + (C_TAIL_ON.g - tg) * bk; c.b = tb + (C_TAIL_ON.b - tb) * bk;
+    c = M.rev.color;
+    c.r = C_REV_OFF.r + (C_REV_ON.r - C_REV_OFF.r) * rv; c.g = C_REV_OFF.g + (C_REV_ON.g - C_REV_OFF.g) * rv; c.b = C_REV_OFF.b + (C_REV_ON.b - C_REV_OFF.b) * rv;
+    pools.visible = fx && hd * alpha > 0.01;
+    M.pools.opacity = hd * alpha * K.poolGain;
 
-    // siren: red and blue swap six times a second, with a glow on the road that flares at each swap
+    // nitro flame: length and brightness flicker
+    const fl = st.nitro * (0.75 + 0.25 * Math.sin(t * 131 + st.phase * 2));
+    flame.visible = fx && st.nitro * alpha > 0.02;
+    if (flame.visible) {
+      flame.scale.z = st.nitro * (0.92 + 0.4 * Math.sin(t * 83 + st.phase) * Math.sin(t * 47.3 + 1.7));
+      M.flame.opacity = alpha * fl;
+    }
+    // what the tail throws on the road: red under braking, white in reverse, orange under nitro
+    tailGlow.visible = fx && (bk > 0.02 || rv > 0.02 || st.nitro > 0.02) && alpha > 0.02;
+    if (tailGlow.visible) {
+      c = M.tailGlow.color;
+      c.r = bk * 0.4 + rv * 0.09 + fl * 0.42; c.g = bk * 0.02 + rv * 0.09 + fl * 0.14; c.b = bk * 0.02 + rv * 0.08 + fl * 0.03;
+      M.tailGlow.opacity = alpha;
+    }
+
+    // siren: red and blue swap six times a second (red on odd sixths, like the game's siren point lights),
+    // with a glow on the road that flares at each swap
     if (police) {
       if (live && s.siren) {
-        const beat = (t + st.phase) * 6, blue = (Math.floor(beat) & 1) === 1, f = beat - Math.floor(beat), flare = 0.5 + 0.5 * (1 - f) * (1 - f);
-        M.barR.color.copy(blue ? C_RED_DIM : C_RED_ON); M.barB.color.copy(blue ? C_BLUE_ON : C_BLUE_DIM);
-        siren.visible = alpha > 0.01;
-        if (blue) M.siren.color.setRGB(0.05, 0.14, 0.62); else M.siren.color.setRGB(0.6, 0.04, 0.05);
-        M.siren.opacity = alpha * flare * 0.55;
+        const beat = t * 6, whole = Math.floor(beat), red = (whole & 1) === 1, f = beat - whole;
+        M.barR.color.copy(red ? C_RED_ON : C_RED_DIM); M.barB.color.copy(red ? C_BLUE_DIM : C_BLUE_ON);
+        siren.visible = fx && alpha > 0.01;
+        M.siren.color.copy(red ? C_GLOW_RED : C_GLOW_BLUE);
+        M.siren.opacity = alpha * (0.5 + 0.5 * (1 - f) * (1 - f)) * 0.45;
       } else {
         M.barR.color.copy(C_BAR_OFF); M.barB.color.copy(C_BAR_OFF); siren.visible = false;
       }
-    }
-
-    // nitro flame
-    st.nitro += ((live && s.nitro ? 1 : 0) - st.nitro) * ease(dt, 20);
-    flame.visible = st.nitro * alpha > 0.02;
-    if (flame.visible) {
-      const n = 0.5 + 0.5 * Math.sin(t * 83 + st.phase) * Math.sin(t * 47.3 + 1.7), n2 = 0.5 + 0.5 * Math.sin(t * 131 + st.phase * 2);
-      flame.scale.set(0.9 + 0.2 * n2, 0.9 + 0.2 * n2, st.nitro * (0.72 + 0.4 * n));
-      M.flame.opacity = alpha * st.nitro * (0.75 + 0.25 * n2);
     }
   }
 

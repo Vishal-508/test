@@ -80,7 +80,13 @@ kbd{font-family:ui-monospace,Menlo,monospace;font-size:.82em;background:#1b2540;
 #hideui.on{opacity:1}
 #hideui .lb{position:absolute;left:0;right:0;height:9vh;background:#000} #hideui .top{top:0} #hideui .bot{bottom:0}
 #hideText{position:absolute;top:calc(9vh + 14px);left:50%;transform:translateX(-50%);font-family:var(--display);letter-spacing:.14em;color:#cfd6ea;text-shadow:0 2px 6px #000;white-space:nowrap}
-#hideMeter{position:absolute;top:calc(9vh + 46px);left:50%;transform:translateX(-50%);width:min(50vw,240px);height:6px;background:rgba(255,255,255,.12);border-radius:4px;overflow:hidden} #hideMeter i{display:block;height:100%;width:0;background:var(--danger)}
+#hideBars{position:absolute;top:calc(9vh + 44px);left:50%;transform:translateX(-50%);display:flex;flex-direction:column;gap:5px;width:min(70vw,300px)}
+.hb{display:grid;grid-template-columns:74px 1fr;gap:8px;align-items:center;font-size:.78rem;letter-spacing:.06em;text-transform:uppercase;color:#aeb8d0;text-shadow:0 1px 4px #000}
+.hb .bar{margin:0;height:7px} #hotBar{background:linear-gradient(90deg,#ffb04a,#ff4a2a)} #nearBar{background:var(--police)} #infBar{background:#c9a0ff} .hb .bar i{transition:none}
+#hideBtns{position:absolute;bottom:calc(9vh + 16px);left:50%;transform:translateX(-50%);display:flex;gap:10px;pointer-events:auto}
+#hideui:not(.on) #hideBtns{pointer-events:none}
+#hideBtns button{font-size:.95rem;white-space:nowrap}
+#status{font-size:.8rem;letter-spacing:.08em;min-width:74px;text-align:center} #status.hunted{color:#fff;background:#b3261e;border-color:#ff6a5a} #status.wanted{color:var(--loot)} #status.clear{color:var(--escape)} #status.hidden{color:var(--hide)}
 #paints{display:flex;gap:7px;flex-wrap:wrap} #paints button{width:30px;height:30px;border-radius:50%;padding:0;border:2px solid rgba(255,255,255,.25)} #paints button.sel{border-color:var(--loot);box-shadow:0 0 0 3px rgba(243,180,63,.35)} #paints button.locked{opacity:.3;cursor:not-allowed}
 #paintName{color:var(--fg);text-transform:none;letter-spacing:0;margin-left:6px}
 .opts button{font-size:.9rem;padding:.45em .8em}
@@ -101,8 +107,8 @@ kbd{font-family:ui-monospace,Menlo,monospace;font-size:.82em;background:#1b2540;
 #prompt{position:absolute;bottom:calc(168px + var(--sab));left:50%;transform:translateX(-50%);background:rgba(8,12,22,.88);border:1px solid var(--line);border-radius:14px;padding:8px 16px;text-align:center;min-width:220px;max-width:92vw}
 #promptText{font-family:var(--display);font-weight:700}
 #prompt .bar i{transition:none}
-#mini{position:absolute;right:calc(10px + var(--sar));top:calc(64px + var(--sat));width:150px;height:150px;border-radius:12px;border:1px solid var(--line);background:#0a0f1c;pointer-events:auto!important;cursor:pointer}
-#mini.big{width:min(86vw,74vh,520px);height:min(86vw,74vh,520px);right:50%;top:50%;transform:translate(50%,-50%);z-index:5;box-shadow:0 0 0 100vmax rgba(4,6,12,.6)}
+#mini{position:absolute;right:calc(10px + var(--sar));top:calc(64px + var(--sat));width:150px;height:150px;border-radius:50%;border:1px solid var(--line);background:#0a0f1c;pointer-events:auto!important;cursor:pointer}
+#mini.big{width:min(86vw,74vh,520px);height:min(86vw,74vh,520px);right:50%;top:50%;transform:translate(50%,-50%);z-index:5;border-radius:12px;box-shadow:0 0 0 100vmax rgba(4,6,12,.6)}
 #vignette{position:fixed;inset:0;pointer-events:none;z-index:9;opacity:0;box-shadow:inset 0 0 120px 40px rgba(255,30,30,.55);transition:opacity .2s}
 #corner{position:absolute;left:calc(10px + var(--sal));bottom:calc(10px + var(--sab));display:flex;gap:8px;pointer-events:auto!important}
 #corner button{font-size:.85rem;padding:.4em .8em;background:rgba(14,20,36,.85)}
@@ -139,7 +145,7 @@ body.touch #prompt{bottom:calc(214px + var(--sab))}
 <div id="hud" hidden>
   <div id="topbar">
     <div id="left">
-      <div class="rowpill"><div id="role" class="pill">CHOR</div><div id="wanted" class="pill" title="Wanted level"></div></div>
+      <div class="rowpill"><div id="role" class="pill">CHOR</div><div id="wanted" class="pill" title="Wanted level"></div><div id="status" class="pill"></div></div>
       <div id="bag">Bag: empty</div>
     </div>
     <div><div id="timer">6:00</div><div id="phase"></div></div>
@@ -150,10 +156,14 @@ body.touch #prompt{bottom:calc(214px + var(--sab))}
   <div id="threat"></div>
   <div id="bust" hidden><div id="bustText">BUST</div><div class="bar"><i id="bustBar"></i></div></div>
   <div id="prompt" hidden><div id="promptText"></div><div class="bar" id="promptBarWrap"><i id="promptBar"></i></div></div>
-  <div id="hideui"><div class="lb top"></div><div class="lb bot"></div><div id="hideText">Engine off. Lights off.</div><div id="hideMeter"><i></i></div></div>
+  <div id="hideui"><div class="lb top"></div><div class="lb bot"></div>
+    <div id="hideText">Engine off. Lights off.</div>
+    <div id="hideBars"><div class="hb"><span>Engine</span><div class="bar"><i id="hotBar"></i></div></div><div class="hb"><span>Police</span><div class="bar"><i id="nearBar"></i></div></div><div class="hb" id="infRow"><span>Informer</span><div class="bar"><i id="infBar"></i></div></div></div>
+    <div id="hideBtns"><button id="btnSlip">Slip out quietly</button><button id="btnBurst" class="primary">Burst out</button></div>
+  </div>
   <div id="dash">
     <div id="speed"><b id="speedNum">0</b><span>km/h</span></div>
-    <div id="nitro" title="Nitro"><i></i></div>
+    <div id="nitro" title="Nitro"><i id="nitroFill"></i></div>
     <div id="lamp" title="Headlights">LIGHTS ON</div>
   </div>
   <canvas id="mini" width="300" height="300" aria-label="Map. Tap to enlarge."></canvas>
@@ -164,7 +174,7 @@ body.touch #prompt{bottom:calc(214px + var(--sab))}
     <button id="btnAct">ACT</button>
   </div>
   <div id="corner"><button id="btnPause">Menu</button><button id="btnLights">Lights</button><button id="btnMute">Sound on</button></div>
-  <div id="help"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> drive · <kbd>E</kbd> action · <kbd>Shift</kbd> nitro · <kbd>Space</kbd> handbrake · <kbd>L</kbd> lights · <kbd>M</kbd> map</div>
+  <div id="help"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> drive · <kbd>Space</kbd> handbrake · <kbd>Shift</kbd> nitro · <kbd>E</kbd> hide · <kbd>L</kbd> lights · <kbd>M</kbd> map · hold <kbd>R</kbd> unstick</div>
 </div>
 
 <div id="menu" class="screen" hidden>
@@ -201,14 +211,14 @@ body.touch #prompt{bottom:calc(214px + var(--sab))}
     <details>
       <summary>How to play</summary>
       <ul>
-        <li><b style="color:var(--loot)">Chor:</b> drive onto a gold ring, stop, and hold the action button to rob it. Carry the loot to a green beam in one of the four corners. Bank the target before time runs out.</li>
-        <li>A police jeep that stays close while you are slow or stopped fills the <b style="color:var(--danger)">bust meter</b>. Keep moving, or lose them.</li>
-        <li>Hide in a garage, godown or shed (violet arrows): stop inside and hold action. The door comes down, your lights go off, and the jeeps drive past. If one stops to search your hideout, burst out before it finishes.</li>
-        <li>Pink dashed lanes are tang galis: your small car fits, police jeeps do not.</li>
-        <li>Nitro is fast but loud. Switching your headlights off makes you harder to spot from far away.</li>
-        <li>The three big tijoris open when the clock tower chimes at 1:00.</li>
-        <li><b style="color:var(--police)">Police:</b> box the chor in to bust them. Follow alarms and tip-offs on your map, and stop in front of hideouts to search them.</li>
-        <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or arrows to drive, <kbd>E</kbd> action, <kbd>Shift</kbd> nitro, <kbd>Space</kbd> handbrake, <kbd>L</kbd> lights, <kbd>M</kbd> map. On a phone: the left thumb steers and accelerates, the buttons on the right do the rest.</li>
+        <li><b style="color:var(--loot)">Chor:</b> stop on a gold ring and the job starts by itself. Roll slowly through a green beam in one of the four corners to hand the loot over. Bank the target before the clock runs out.</li>
+        <li>A police jeep that stays close while you are slow fills the <b style="color:var(--danger)">bust meter</b>. Keep your speed up, or lose them.</li>
+        <li><b style="color:var(--hide)">Hideouts</b> (violet arrows on the road): pull up at the door and press the action button. Your car swings in and the door comes down. A search finds you if they saw you go in, or if your engine is still warm when they touch the bonnet, so get a lead before you hide. Slip out quietly or burst out.</li>
+        <li>Pink dashed lanes are tang galis: your small car fits, police jeeps do not. Do not sit in one; someone will call it in.</li>
+        <li>Hold the handbrake and steer to drift. Long drifts and close shaves refill nitro. Nitro is fast but loud.</li>
+        <li>The three big tijoris open when the clock tower chimes at 0:45. Their siren starts a third of the way through the job.</li>
+        <li><b style="color:var(--police)">Police:</b> stay beside a slow car to bust it. Follow alarms and tip-offs on your radar. Stop outside a hideout door and hold the action button to search it.</li>
+        <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or arrows to drive, <kbd>Space</kbd> handbrake, <kbd>Shift</kbd> nitro, <kbd>E</kbd> action, <kbd>L</kbd> lights, <kbd>M</kbd> map, hold <kbd>R</kbd> to get unstuck. On a phone: hold the left thumb down to drive, slide it to steer, pull back to brake.</li>
       </ul>
     </details>
   </div>

@@ -1,34 +1,44 @@
 # Chor Police: Jugnupur ki Raat
 
-A 3D chor-police game that runs in the browser. Rob the night town of Jugnupur, hide from the police,
-and carry the loot out before time runs out. Play alone against computer constables, or with friends
+A 3D chor-police car chase that runs in the browser. Drive a getaway car through the night town of
+Jugnupur, rob shops and tijoris, vanish into hideouts while the police search for you, and hand the
+loot over before the clock runs out. Play alone against computer-driven police jeeps, or with friends
 using a room code.
 
-**Play it:** https://vishal-508.github.io/test/ (works once GitHub Pages is switched on, see below)
+**Play it:** https://vishal-508.github.io/test/
 
 ## How to play
 
-- **Chor:** rob the glowing gold boxes, then carry the loot to a green beam in one of the four corners.
-  Bank the target amount before the six minutes are up.
-- Hide in the violet circles. Police cannot see you there unless they search that exact spot.
-- Running is fast but noisy, and someone tips off the police now and then while you carry a bag through lit streets.
-  The dark park is safe from tip-offs.
-- The three big tijoris (jeweller, bank, market strongroom) open when the clock tower chimes at 1:00.
-  The mail coach at the station is open only from 3:00 to 4:00.
-- Pink dashed trails are shortcuts the computer police will not follow. Crawl pipes are for chors only.
-- **Police:** touch a chor to arrest. Follow alarms and tip-offs on your map, and search hiding spots.
-- Caught chors go to the lock-up. With friends, a free chor can pull one of the two levers beside the
-  thana to free everyone inside. Alone, you are bailed out after 15 seconds, and the third arrest ends the round.
+- **Chor:** stop on a gold ring and the job starts by itself. Roll slowly through a green beam in one of
+  the four corners to hand the loot over. Bank the target before the four minutes are up.
+- A police jeep that stays close while you are slow fills the **bust meter**. Keep your speed up, or lose them.
+- **Hideouts** (violet arrows on the road): pull up at the door and press the action button. The car
+  swings in and the door comes down. From inside you watch the lane through the gaps. A search finds you
+  if the police saw you go in, or if your engine is still warm when the officer touches the bonnet, so get
+  a lead before you hide. Sit too long and an informer gives the door away. Slip out quietly, or burst out.
+- Pink dashed lanes are tang galis: the getaway car fits, police jeeps do not. Sitting in one gets you reported.
+- Hold the handbrake and steer to drift. Long drifts and close shaves refill nitro. Nitro is fast but loud.
+- Switching the headlights off makes a creeping car harder to see.
+- The three big tijoris open when the clock tower chimes (45 seconds in). Their siren starts a third of
+  the way through the job. The mail coach strongbox is open only from 2:00 to 2:45.
+- **Police:** stay beside a slow car to bust it. Follow alarms and tip-offs on the radar. Stop outside a
+  hideout door and hold the action button to search it.
+- Busted cars go to the impound. With friends, a free chor can stop at one of the two levers beside the
+  thana to let everyone out. Alone, the car is released after 10 seconds, and the third bust ends the round.
 
-| | Keyboard and mouse | Phone |
+| | Keyboard | Phone |
 |---|---|---|
-| Move | `WASD` or arrow keys | left thumb (stick appears where you touch) |
-| Action (rob, bank, hide, lever, search) | hold `Space` | hold **ACT** |
-| Run | hold `Shift` | hold **RUN** |
-| Turn the camera | drag, or `Q` / `E` | drag with the right thumb |
-| Big map | `M` | tap the small map |
+| Drive | `W` `A` `S` `D` or arrow keys | hold the left thumb down to drive, slide to steer, pull back to brake |
+| Handbrake (drift) | `Space` | **DRIFT** |
+| Nitro | `Shift` | **NITRO** |
+| Action (hide, leave, search) | `E` | **HIDE** / **SEARCH** |
+| Headlights | `L` | **Lights** |
+| Horn | `H` | |
+| Big map | `M` | tap the radar |
+| Put the car back on the road | hold `R` | happens by itself when stuck |
 
-Solo play is a ladder of nights: each win unlocks a harder night with more loot to bank and sharper police.
+Solo play is a ladder of nights: each win unlocks a harder night with more loot to bank, more jeeps and
+sometimes rain. Loot you bank raises your rank and unlocks new paint for the getaway car.
 
 ## Playing with friends
 
@@ -36,17 +46,13 @@ Solo play is a ladder of nights: each win unlocks a harder night with more loot 
 2. Friends press **Join room** and type the code. Up to 8 players.
 3. Everyone picks a side, chor or police. The host presses **Start round**.
 
-Computer constables fill in when there are few police players. The player who created the room should
+Computer jeeps fill in when there are few police players. The player who created the room should
 keep the game tab open and in front, because their browser runs the round for everyone.
 
 ## Hosting on GitHub Pages
 
-The game is plain files with no build step, so GitHub Pages can serve it as it is.
-
-1. On GitHub open this repository, then **Settings → Pages**.
-2. Under **Build and deployment**, choose **Deploy from a branch**, pick the branch that holds these files
-   and the `/ (root)` folder, then **Save**.
-3. After a minute or two the game is live at `https://vishal-508.github.io/test/`.
+The game is plain files with no build step, so GitHub Pages serves it as it is. The live copy is the
+`gh-pages` branch of this repository (**Settings → Pages → Deploy from a branch → gh-pages, / (root)**).
 
 To try it on your own computer, serve the folder with any static server (for example
 `python3 -m http.server`) and open the address it prints. Opening `index.html` straight from disk does not
@@ -65,20 +71,25 @@ another network or Wi-Fi.
 | Path | What it is |
 |---|---|
 | `index.html` | the page, menus and on-screen controls |
-| `js/game.js` | rules, police AI, multiplayer sync, input and the main loop |
-| `js/world.js` | turns the map into walkable ground, buildings, sight lines and paths |
-| `js/scene.js`, `js/entities.js` | the 3D town and the characters |
-| `js/net.js`, `js/audio.js`, `js/config.js` | room codes and connections, synthesised sound, tunable numbers |
-| `data/map.json` | the town of Jugnupur: roads, places to rob, hiding spots, ways out |
-| `vendor/` | [three.js](https://threejs.org) r160 and [PeerJS](https://peerjs.com) 1.5.4, both MIT licensed |
-| `tools/check-world.mjs` | `node tools/check-world.mjs` checks the map is fully connected after an edit |
+| `js/game.js` | rules, police driving, multiplayer sync, input, camera and the main loop |
+| `js/config.js` | every tunable number: round length, speeds, bust meter, hideout timings, night ladder |
+| `js/vehicle.js` | car handling (drift, nitro, crashes) and the computer driver |
+| `js/world.js` | turns the map into roads, buildings, hideout bays, sight lines and routes |
+| `js/scene.js`, `js/dressing.js` | the 3D town: ground, buildings, lamps, neon signs, rooftops |
+| `js/cars.js`, `js/hideouts.js` | the car models and the nine kinds of hideout |
+| `js/fx.js`, `js/postfx.js` | smoke, sparks, skid marks, rain; bloom and colour grade |
+| `js/audio.js` | engine, sirens, music and effects, all synthesised (no sound files) |
+| `js/net.js` | room codes and browser-to-browser connections |
+| `data/map.json` | the town of Jugnupur: roads, places to rob, hiding spots, hand-off points |
+| `vendor/` | [three.js](https://threejs.org) r160 (with its post-processing add-ons) and [PeerJS](https://peerjs.com) 1.5.4, both MIT licensed |
+| `tools/check-world.mjs` | `node tools/check-world.mjs` checks every place on the map can be driven to |
+| `tools/preview-*.html` | stand-alone viewers for the cars, hideouts, effects, sounds and signs |
 
-## Not in this first version
+## Not built
 
-- Everyone is on foot. The police jeep from the map plan is not built.
-- Rooftop runs and the dry drain are flat passages, not raised or sunken levels.
-- Each tijori has one door. The quiet back way from the map plan is not built.
-- The computer only plays police. A solo player is always the chor.
+- The town is flat: no ramps, bridges or rooftop driving.
+- The computer only drives police jeeps. A solo player is always the chor.
+- There is no traffic and nobody walks the streets.
 
 ---
 

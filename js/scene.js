@@ -3,6 +3,7 @@
 import * as THREE from '../vendor/three.module.min.js';
 import { N, CS, T, LANE, hash2 } from './world.js';
 import { buildHideout, kindFor } from './hideouts.js';
+import { CFG } from './config.js';
 
 const FONT = '"Baloo 2","Trebuchet MS","Segoe UI",sans-serif';
 
@@ -53,13 +54,13 @@ export function paintGround(size, map, W) {
   const mask = mk(), m = mask.getContext('2d'); m.fillStyle = '#fff';
   for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
     const t = W.type[j * N + i], x = (i + 0.5) * CS, y = (j + 0.5) * CS;
-    if (t === T.WALK || t === T.CAGE || (t === T.PROP && W.inPark(x, y))) { c.fillStyle = base[W.districtAt(x, y)]; c.fillRect(i * px, j * px, px + 0.6, px + 0.6); m.fillRect(i * px, j * px, px + 0.6, px + 0.6); }
+    if (t === T.WALK || t === T.CAGE || t === T.BAY || (t === T.PROP && W.inPark(x, y))) { c.fillStyle = base[W.districtAt(x, y)]; c.fillRect(i * px, j * px, px + 0.6, px + 0.6); m.fillRect(i * px, j * px, px + 0.6, px + 0.6); }
     else if (t === T.WATER) { c.fillStyle = '#0b2644'; c.fillRect(i * px, j * px, px + 0.6, px + 0.6); }
     else if (t === T.RAIL) { c.fillStyle = '#17181d'; c.fillRect(i * px, j * px, px + 0.6, px + 0.6); }
   }
   const lay = mk(); drawLanes(lay.getContext('2d'), S, map, W, mask); c.drawImage(lay, 0, 0);
   // hideout bay floors: oil-stained concrete
-  for (const h of W.hides) if (h.bay) { c.fillStyle = '#1d2029'; c.fillRect(h.bay.x0 * S, h.bay.y0 * S, (h.bay.x1 - h.bay.x0) * S, (h.bay.y1 - h.bay.y0) * S); c.fillStyle = 'rgba(0,0,0,0.35)'; c.beginPath(); c.ellipse(h.x * S, h.y * S, 0.35 * S, 0.5 * S, 0, 0, 7); c.fill(); }
+  for (const h of W.hides) if (h.bay && !h.grove) { c.fillStyle = '#1d2029'; c.fillRect(h.bay.x0 * S, h.bay.y0 * S, (h.bay.x1 - h.bay.x0) * S, (h.bay.y1 - h.bay.y0) * S); c.fillStyle = 'rgba(0,0,0,0.35)'; c.beginPath(); c.ellipse(h.x * S, h.y * S, 0.35 * S, 0.5 * S, 0, 0, 7); c.fill(); }
   // rails and river detail
   c.strokeStyle = '#2a2420'; c.lineWidth = 0.12 * S;
   for (let x = 0; x < 100; x += 0.55) { c.beginPath(); c.moveTo(x * S, 3.6 * S); c.lineTo(x * S, 4.4 * S); c.stroke(); }
@@ -83,12 +84,10 @@ export function paintGround(size, map, W) {
   for (const s of W.sites) { ring(s.x, s.y, 1.1, 'rgba(243,180,63,0.8)', 0.08); ring(s.x, s.y, 0.85, 'rgba(243,180,63,0.3)', 0.05, [0.3, 0.2]); }
   for (const x of W.escapes) { ring(x.x, x.y, 1.35, 'rgba(59,201,139,0.9)', 0.1); ring(x.x, x.y, 1.0, 'rgba(59,201,139,0.35)', 0.06, [0.35, 0.25]); }
   for (const v of W.levers) ring(v.x, v.y, 0.6, 'rgba(106,152,255,0.9)', 0.07);
-  for (const h of W.hides) { // violet chevrons pointing into each hideout
-    if (h.grove) { ring(h.x, h.y, 0.95, 'rgba(173,144,255,0.7)', 0.07, [0.25, 0.2]); continue; }
-    if (!h.mouth) { ring(h.x, h.y, 0.8, 'rgba(173,144,255,0.7)', 0.07, [0.25, 0.2]); continue; }
+  for (const h of W.hides) { // violet chevrons on the lane, pointing at each hideout door
     const nx = h.bay.nx, ny = h.bay.ny, tx = -ny, ty = nx;
-    e.strokeStyle = 'rgba(173,144,255,0.85)'; e.lineWidth = 0.07 * S; e.lineJoin = 'round';
-    for (const off of [0.15, 0.5]) { const cx = h.mouth.x + nx * off, cy = h.mouth.y + ny * off; e.beginPath(); e.moveTo((cx + tx * 0.42 - nx * 0.22) * S, (cy + ty * 0.42 - ny * 0.22) * S); e.lineTo((cx + nx * 0.12) * S, (cy + ny * 0.12) * S); e.lineTo((cx - tx * 0.42 - nx * 0.22) * S, (cy - ty * 0.42 - ny * 0.22) * S); e.stroke(); }
+    e.strokeStyle = 'rgba(173,144,255,0.9)'; e.lineWidth = 0.08 * S; e.lineJoin = 'round';
+    for (const off of [-0.75, -0.4]) { const cx = h.mouth.x + nx * off, cy = h.mouth.y + ny * off; e.beginPath(); e.moveTo((cx + tx * 0.4 - nx * 0.2) * S, (cy + ty * 0.4 - ny * 0.2) * S); e.lineTo((cx + nx * 0.12) * S, (cy + ny * 0.12) * S); e.lineTo((cx - tx * 0.4 - nx * 0.2) * S, (cy - ty * 0.4 - ny * 0.2) * S); e.stroke(); }
   }
   e.globalCompositeOperation = 'lighter';
   const glow = (x, y, r, col, a) => {
@@ -121,7 +120,8 @@ export function paintMini(cv, map, W) {
   c.fillStyle = '#13281b'; c.fillRect(24 * S, 52 * S, 24 * S, 24 * S);
   for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
     const k = j * N + i, t = W.type[k];
-    if (t === T.WALK) c.fillStyle = W.lane[k] === LANE.BAY ? '#7a62c9' : W.inPark((i + 0.5) * CS, (j + 0.5) * CS) ? '#1f4a30' : (W.ai[k] ? '#414c6b' : '#8a4a6e');
+    if (t === T.WALK) c.fillStyle = W.inPark((i + 0.5) * CS, (j + 0.5) * CS) ? '#1f4a30' : (W.ai[k] ? '#414c6b' : '#8a4a6e');
+    else if (t === T.BAY) c.fillStyle = '#7a62c9';
     else if (t === T.WATER) c.fillStyle = '#143a63';
     else if (t === T.RAIL) c.fillStyle = '#1c1e26';
     else if (t === T.CAGE) c.fillStyle = '#3a56a8';
@@ -157,17 +157,21 @@ export function makeBuildingMaterial(U, windows) {
   mat.onBeforeCompile = sh => {
     sh.uniforms.uCut = U.uCut; sh.uniforms.uRes = U.uRes;
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nvarying vec3 vWPos;\nvarying vec3 vONormal;\nvarying float vDepthC;')
+      .replace('#include <common>', '#include <common>\nvarying vec3 vWPos;\nvarying vec3 vONormal;\nvarying float vDepthC;\nvarying vec4 vRoof;')
       .replace('#include <project_vertex>', `#include <project_vertex>
         vec4 wpC = vec4( transformed, 1.0 );
         #ifdef USE_INSTANCING
           wpC = instanceMatrix * wpC;
+          vec2 scC = vec2( length( instanceMatrix[ 0 ].xyz ), length( instanceMatrix[ 2 ].xyz ) );
+          vRoof = vec4( position.x * scC.x, position.z * scC.y, scC );
+        #else
+          vRoof = vec4( 0.0, 0.0, 1000.0, 1000.0 );
         #endif
         vWPos = ( modelMatrix * wpC ).xyz;
         vONormal = normal;
         vDepthC = - mvPosition.z;`);
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying vec3 vWPos;\nvarying vec3 vONormal;\nvarying float vDepthC;\nuniform vec3 uCut;\nuniform vec2 uRes;')
+      .replace('#include <common>', '#include <common>\nvarying vec3 vWPos;\nvarying vec3 vONormal;\nvarying float vDepthC;\nvarying vec4 vRoof;\nuniform vec3 uCut;\nuniform vec2 uRes;')
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
         {
           vec2 spC = gl_FragCoord.xy / uRes;
@@ -175,7 +179,23 @@ export function makeBuildingMaterial(U, windows) {
           if ( vDepthC < uCut.z - 0.2 && cdC < 0.15 ) {
             if ( cdC < 0.105 || mod( floor( gl_FragCoord.x ) + floor( gl_FragCoord.y ), 2.0 ) < 0.5 ) discard;
           }
-          if ( vONormal.y > 0.5 ) { diffuseColor.rgb = diffuseColor.rgb * 0.42 + vec3( 0.02, 0.022, 0.03 ); }
+          if ( vONormal.y > 0.5 ) {
+            // flat roofs: patchy slabs with seams, a parapet round the edge, now and then a lit skylight
+            float eC = min( vRoof.z * 0.5 - abs( vRoof.x ), vRoof.w * 0.5 - abs( vRoof.y ) );
+            vec3 wallC = diffuseColor.rgb;
+            vec3 roofC = wallC * 0.42 + vec3( 0.02, 0.022, 0.03 );
+            vec2 rgC = vWPos.xz * 1.1; vec2 ridC = floor( rgC ); vec2 rfC = fract( rgC );
+            float rhC = fract( sin( dot( ridC, vec2( 12.9898, 78.233 ) ) ) * 43758.5453 );
+            float farC = clamp( ( vDepthC - 14.0 ) / 14.0, 0.0, 1.0 );   // detail fades with distance so it never shimmers
+            roofC *= mix( 0.8 + 0.4 * rhC, 1.0, farC );
+            roofC *= 1.0 - 0.22 * ( 1.0 - farC ) * max( step( rfC.x, 0.07 ), step( rfC.y, 0.07 ) );
+            float rimC = step( eC, 0.1 );
+            roofC *= 1.0 - 0.45 * ( 1.0 - rimC ) * ( 1.0 - smoothstep( 0.1, 0.3, eC ) );
+            roofC = mix( roofC, wallC * 0.78 + vec3( 0.03 ), rimC );
+            float skyC = step( 0.955, rhC ) * step( 0.55, eC ) * step( 0.25, rfC.x ) * step( rfC.x, 0.75 ) * step( 0.3, rfC.y ) * step( rfC.y, 0.7 );
+            totalEmissiveRadiance += vec3( 1.0, 0.8, 0.5 ) * skyC * 0.55;
+            diffuseColor.rgb = roofC;
+          }
           ${windows ? `else if ( abs( vONormal.y ) < 0.5 ) {
             float uC = abs( vONormal.x ) > 0.5 ? vWPos.z : vWPos.x;
             float sideC = abs( vONormal.x ) > 0.5 ? floor( vWPos.x * 2.0 ) : floor( vWPos.z * 2.0 ) + 31.0;
@@ -196,7 +216,7 @@ export function makeBuildingMaterial(U, windows) {
           }` : ''}
         }`);
   };
-  mat.customProgramCacheKey = () => 'bldg2' + (windows ? 1 : 0);
+  mat.customProgramCacheKey = () => 'bldg3' + (windows ? 1 : 0);
   return mat;
 }
 
@@ -352,7 +372,7 @@ export function buildScene(scene, map, W, U, quality) {
     const g = new THREE.Group(); g.position.set(s.x, 0, s.y); scene.add(g);
     const gem = new THREE.Mesh(gemGeo, bas(COLORS.loot)); gem.position.y = 0.95; gem.scale.setScalar(sc); g.add(gem);
     const beam = new THREE.Mesh(beamGeo, beamMat(COLORS.loot)); beam.scale.set(sc, 1, sc); g.add(beam);
-    const label = makeLabel(`${s.name}  ₹${s.value}`, { color: '#ffd98a', h: s.tier === 3 ? 0.5 : 0.4, border: s.tier === 3 ? 'rgba(243,180,63,0.9)' : null });
+    const label = makeLabel(`${s.name}  ₹${CFG.VALUE[s.tier] || s.value}`, { color: '#ffd98a', h: s.tier === 3 ? 0.5 : 0.4, border: s.tier === 3 ? 'rgba(243,180,63,0.9)' : null });
     label.position.set(0, 1.75 + sc * 0.2, 0); g.add(label);
     const lock = makeLabel('LOCKED', { color: '#ff9c9c', h: 0.3 }); lock.position.set(0, 1.35, 0); lock.visible = false; g.add(lock);
     H.siteVis.push({ g, gem, beam, label, lock, state: -1, sc });
@@ -382,11 +402,12 @@ export function buildScene(scene, map, W, U, quality) {
   const hctx = { cutMat, makeLabel };
   for (const h of W.hides) {
     const kind = h.grove ? 'grove' : kindFor(h.kind);
-    const ho = buildHideout({ kind, w: h.bay ? h.bay.w : 2.2, d: h.bay ? h.bay.d : 2.2, seed: h.i * 7 + 3 }, hctx);
+    const ho = buildHideout({ kind, w: h.bay.w, d: h.bay.d, seed: h.i * 7 + 3 }, hctx);
+    ho.setClosed(1);   // every door is shut unless someone is going in or out, so a shut door tells the police nothing
     ho.g.position.set(h.x, 0, h.y); ho.g.rotation.y = h.a; scene.add(ho.g);
     const label = makeLabel(ho.name || kind, { color: '#d9ccff', h: 0.34 }); label.position.set(h.x, 1.35, h.y); scene.add(label);
     h.hkind = kind; h.name = ho.name || kind;
-    H.hideVis.push({ ho, label, closed: 0, search: 0 });
+    H.hideVis.push({ ho, label, closed: 1, search: 0 });
   }
 
   H.thanaLamp = thanaLamp;

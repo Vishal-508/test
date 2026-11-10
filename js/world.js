@@ -4,13 +4,13 @@
 
 export const N = 200;     // cells per side
 export const CS = 0.5;    // cell size in map units (2.5 m)
-export const T = { WALK: 0, BLDG: 1, WATER: 2, RAIL: 3, CAGE: 4, MARK: 6, PROP: 7 };
+export const T = { WALK: 0, BLDG: 1, WATER: 2, RAIL: 3, CAGE: 4, BAY: 5, MARK: 6, PROP: 7 };
 export const LANE = { NONE: 0, OPEN: 1, ALLEY: 2, STREET: 3, MAIN: 4, DRAIN: 5, GALI: 6, BAY: 7 };
 
 const HW = { main: 1.5, street: 1.0, alley: 0.8, plank: 0.8, bridge: 1.5, drain: 1.2 };
 const LANE_OF = { main: LANE.MAIN, bridge: LANE.MAIN, street: LANE.STREET, alley: LANE.ALLEY, plank: LANE.ALLEY, drain: LANE.DRAIN };
 const GALI_HW = 0.75;
-const OPEN_ROUTES = new Set(['Ganda Nala Bed', 'Tirpal Surang']);   // every other shortcut is a tang gali: too narrow for a police jeep
+const OPEN_ROUTES = new Set(['Ganda Nala Bed']);   // every other shortcut is a tang gali: too narrow for a police jeep
 const BAY_W = 1.5, BAY_D = 2.0;
 
 export function hash2(i, j) {
@@ -88,6 +88,7 @@ export function buildWorld(map) {
   }
   carveRect(53.5, 37.5, 62.5, 46.5, LANE.OPEN);
   carveRect(88.5, 44.5, 97.5, 61.5, LANE.OPEN);
+  carveRect(46.5, 46.5, 53.5, 53.5, LANE.MAIN);   // Ghanta Ghar chowk: a square ring of road round the clock tower
 
   // --- tang galis (chor only), then every road, street and alley
   const galis = [];
@@ -168,7 +169,8 @@ export function buildWorld(map) {
   for (const p of solidProps) stamp(p.x0, p.y0, p.x1, p.y1, T.PROP);
   for (const s of [...sites, ...escapes]) rect(s.x - 0.9, s.y - 0.9, s.x + 0.9, s.y + 0.9, k => { if (type[k] === T.PROP) { type[k] = T.WALK; ai[k] = 1; lane[k] = LANE.OPEN; } });
 
-  // --- hideouts: a bay a car can drive into, cut into the buildings beside the nearest lane
+  // --- hideouts: a sealed bay cut into the buildings beside a lane. Nobody drives into one; a chor asks to be let in
+  //     from the lane outside its door (front), is parked inside by the game, and police search it from the lane.
   const hides = [];
   const bayFree = (x0, y0, x1, y1) => {
     if (x0 < 1.5 || y0 < 5.5 || x1 > 98.5 || y1 > 93.8) return false;
@@ -177,21 +179,29 @@ export function buildWorld(map) {
     return ok;
   };
   map.hiding_spots.forEach((h, i) => {
-    const rec = { i, kind: h.kind, x: h.x, y: h.y, a: 0, bay: null, mouth: null, r: 1.0 };
-    if (inPark(h.x, h.y)) { // in the open park: a grove of trees, no walls
+    const rec = { i, kind: h.kind, x: h.x, y: h.y, a: 0, bay: null, mouth: null, front: null, grove: false };
+    if (inPark(h.x, h.y)) { // in the open park: a thicket, entered from the side nearest a path
       const best = nearestLine(h.x, h.y, true);
-      carve(h.x, h.y, h.x, h.y, 1.2, true, LANE.OPEN);
-      rec.a = best ? Math.atan2(best.qx - h.x, best.qy - h.y) : 0; rec.grove = true;
+      let dx = best ? best.qx - h.x : 0, dy = best ? best.qy - h.y : 1; const dl = Math.hypot(dx, dy) || 1;
+      if (Math.abs(dx) > Math.abs(dy)) { dx = Math.sign(dx); dy = 0; } else { dy = Math.sign(dy) || 1; dx = 0; }
+      // the door must open onto park ground, not onto the park wall
+      const openAt = (ex, ey) => { const t = type[idx(cellOf(h.x + ex * 2.0), cellOf(h.y + ey * 2.0))], m = type[idx(cellOf(h.x + ex * 1.3), cellOf(h.y + ey * 1.3))]; return (t === T.WALK || t === T.PROP) && (m === T.WALK || m === T.PROP); };
+      if (!openAt(dx, dy)) { const alt = [[-dx, -dy], [dy, dx], [-dy, -dx]].find(d => openAt(d[0], d[1])); if (alt) { dx = alt[0]; dy = alt[1]; } }
+      rect(h.x - 1, h.y - 1, h.x + 1, h.y + 1, k => { type[k] = T.BAY; ai[k] = 0; lane[k] = 0; });
+      rec.grove = true; rec.a = Math.atan2(dx, dy); rec.mouth = { x: h.x + dx, y: h.y + dy }; rec.front = { x: h.x + dx * 2.0, y: h.y + dy * 2.0 };
+      rect(rec.front.x - 0.6, rec.front.y - 0.6, rec.front.x + 0.6, rec.front.y + 0.6, k => { if (type[k] === T.PROP) { type[k] = T.WALK; ai[k] = 1; lane[k] = LANE.OPEN; } });
+      rec.bay = { x0: h.x - 1, y0: h.y - 1, x1: h.x + 1, y1: h.y + 1, w: 2, d: 2, nx: -dx, ny: -dy };
       hides.push(rec); return;
     }
     // try the lanes nearest to the spot, either side, sliding along the lane until a bay fits inside solid building
     const near = lines.filter(l => l.ai && l.kind !== LANE.GALI).map(l => ({ l, q: distSeg(h.x, h.y, l.ax, l.ay, l.bx, l.by) })).sort((a, b) => (a.q.d + (a.l.kind === LANE.MAIN ? 3 : 0)) - (b.q.d + (b.l.kind === LANE.MAIN ? 3 : 0))).slice(0, 6);
-    let done = false;
     for (const { l, q } of near) {
-      const L = Math.hypot(l.bx - l.ax, l.by - l.ay); if (L < 0.5) continue;
+      if (rec.bay) break;
+      const L = Math.hypot(l.bx - l.ax, l.by - l.ay); if (L < 3.2) continue;
       const ux = (l.bx - l.ax) / L, uy = (l.by - l.ay) / L;
       const side0 = ((h.x - q.qx) * -uy + (h.y - q.qy) * ux) >= 0 ? 1 : -1;
       for (const sh of [0, 1, -1, 2, -2, 3, -3, 4, -4, 5, -5, 6, -6]) {
+        if (rec.bay) break;
         const t = Math.round((q.t * L + sh) * 2) / 2; if (t < 1.5 || t > L - 1.5) continue;
         const bx = l.ax + ux * t, by = l.ay + uy * t;
         for (const side of [side0, -side0]) {
@@ -206,20 +216,16 @@ export function buildWorld(map) {
           // the bay itself plus a one-cell wall on the three closed sides must be solid building
           const gx = Math.abs(ux) * 0.5 + Math.abs(nx) * 0.25, gy = Math.abs(uy) * 0.5 + Math.abs(ny) * 0.25;
           if (!bayFree(cx - hx - gx + nx * 0.3, cy - hy - gy + ny * 0.3, cx + hx + gx + nx * 0.3, cy + hy + gy + ny * 0.3)) continue;
-          rect(cx - hx, cy - hy, cx + hx, cy + hy, k => { type[k] = T.WALK; ai[k] = 1; lane[k] = LANE.BAY; });
-          carve(mx, my, bx, by, BAY_W / 2 - 0.05, true, LANE.BAY);       // join the bay to the lane
-          rec.x = cx; rec.y = cy; rec.a = Math.atan2(-nx, -ny); rec.mouth = { x: mx, y: my };
+          rect(cx - hx, cy - hy, cx + hx, cy + hy, k => { type[k] = T.BAY; ai[k] = 0; lane[k] = 0; });
+          rec.x = cx; rec.y = cy; rec.a = Math.atan2(-nx, -ny); rec.mouth = { x: mx, y: my }; rec.front = { x: bx, y: by };
           rec.bay = { x0: cx - hx, y0: cy - hy, x1: cx + hx, y1: cy + hy, w: BAY_W, d: BAY_D, nx, ny };
-          rec.front = { x: bx, y: by };                                  // where a jeep stops to search
-          done = true; break;
+          break;
         }
-        if (done) break;
       }
-      if (done) break;
     }
-    if (!done) { rec.a = poi(h.x, h.y, 1.1); rec.front = nearestLine(h.x, h.y, true); rec.front = rec.front ? { x: rec.front.qx, y: rec.front.qy } : { x: h.x, y: h.y }; }
-    hides.push(rec);
+    if (rec.bay) hides.push(rec);   // a spot with no room for a bay is simply left out
   });
+  hides.forEach((h, k) => { h.i = k; });
 
   // --- river and railway are open ground nobody can cross
   for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
@@ -298,7 +304,7 @@ export function buildWorld(map) {
   const solidChor = (i, j) => i < 0 || j < 0 || i >= N || j >= N || type[j * N + i] !== T.WALK;
   const solidPolice = (i, j) => i < 0 || j < 0 || i >= N || j >= N || !ai[j * N + i];
   const laneAt = (x, y) => inMap(x, y) ? lane[cellAtXY(x, y)] : 0;
-  const blocksSight = t => t === T.BLDG || t === T.MARK || t === T.PROP;
+  const blocksSight = t => t === T.BLDG || t === T.MARK || t === T.PROP || t === T.BAY;
   const los = (ax, ay, bx, by) => {
     const d = Math.hypot(bx - ax, by - ay), n = Math.ceil(d / 0.2);
     for (let k = 1; k < n; k++) {
@@ -346,6 +352,45 @@ export function buildWorld(map) {
     return c;
   };
   const clrPolice = clearance(ai), clrChor = clearance(walkMask);
+
+  // --- where a jeep parks to search each hideout: on the lane, a little to one side of the door
+  for (const h of hides) {
+    const ux = Math.cos(h.a), uy = -Math.sin(h.a);   // along the lane
+    let best = null, bc = 0;
+    for (const s of [1.1, -1.1, 0.6, -0.6, 0]) {
+      const x = h.front.x + ux * s, y = h.front.y + uy * s;
+      if (x < 0 || y < 0 || x >= 100 || y >= 100) continue;
+      const k = idx(Math.floor(x / CS), Math.floor(y / CS));
+      if (ai[k] && clrPolice[k] > bc) { bc = clrPolice[k]; best = { x, y }; }
+    }
+    h.search = best || nearestWalk(h.front.x, h.front.y, true);
+  }
+
+  // --- a roomy place to put a stuck car back on the road, facing along the lane
+  const safeSpot = (x, y, forPolice) => {
+    const mask = forPolice ? ai : walkMask, clr = forPolice ? clrPolice : clrChor;
+    const ci = cellOf(x), cj = cellOf(y);
+    let best = -1, bd = 1e9;
+    for (let r = 0; r < 24 && best < 0; r++) {
+      for (let j = cj - r; j <= cj + r; j++) for (let i = ci - r; i <= ci + r; i++) {
+        if (i < 0 || j < 0 || i >= N || j >= N) continue;
+        if (Math.max(Math.abs(i - ci), Math.abs(j - cj)) !== r) continue;
+        const k = idx(i, j);
+        if (mask[k] && clr[k] >= 2 && (forPolice || lane[k] !== LANE.GALI)) { const dd = (i - ci) * (i - ci) + (j - cj) * (j - cj); if (dd < bd) { bd = dd; best = k; } }
+      }
+    }
+    if (best < 0) { const q = nearestWalk(x, y, forPolice); return { x: q.x, y: q.y, a: 0 }; }
+    const bi = best % N, bj = (best - bi) / N;
+    // face the way with the longest clear run
+    let a = 0, run = -1;
+    for (let q = 0; q < 8; q++) {
+      const an = q * Math.PI / 4, dx = Math.sin(an), dy = Math.cos(an);
+      let n = 0;
+      for (; n < 16; n++) { const i = Math.floor(((bi + 0.5) * CS + dx * (n + 1) * CS) / CS), j = Math.floor(((bj + 0.5) * CS + dy * (n + 1) * CS) / CS); if (i < 0 || j < 0 || i >= N || j >= N || !mask[idx(i, j)]) break; }
+      if (n > run) { run = n; a = an; }
+    }
+    return { x: (bi + 0.5) * CS, y: (bj + 0.5) * CS, a };
+  };
 
   // --- A* over the chosen cells (police jeeps by default; pass true for the chor's fuller network)
   const gS = new Float32Array(N * N), fS = new Float32Array(N * N), came = new Int32Array(N * N), seen = new Uint32Array(N * N), closed = new Uint32Array(N * N);
@@ -411,12 +456,15 @@ export function buildWorld(map) {
     return out;
   };
 
+  // chor cars start out in the lane beside their corner, facing the longest clear run
+  for (const s of spawns) { const q = safeSpot(s.x + Math.sin(s.a) * 1.5, s.y + Math.cos(s.a) * 1.5, false); s.x = q.x; s.y = q.y; s.a = q.a; }
+
   return {
     type, ai, lane, boxes, facades, lamps, trees, lines, marks, solidProps, cage, galis,
     sites, hides, escapes, levers, posts, spawns,
     policeSpawns: [{ x: 54.6, y: 41.2, a: 0 }, { x: 55.8, y: 41.2, a: 0 }, { x: 57, y: 41.2, a: 0 }, { x: 54.6, y: 43.4, a: 0 }, { x: 55.8, y: 43.4, a: 0 }, { x: 57, y: 43.4, a: 0 }, { x: 58.2, y: 44.6, a: 0 }, { x: 54.6, y: 45.4, a: 0 }],
     cageSlots: [{ x: 54.0, y: 38.05 }, { x: 54.85, y: 38.05 }, { x: 55.7, y: 38.05 }, { x: 56.55, y: 38.05 }, { x: 54.0, y: 38.95 }, { x: 54.85, y: 38.95 }, { x: 55.7, y: 38.95 }, { x: 56.55, y: 38.95 }],
     releasePoints: [{ x: 50.5, y: 38.5, a: Math.PI }, { x: 57.5, y: 36, a: -Math.PI / 2 }],
-    districtAt, inPark, walkable, policeOk, solidChor, solidPolice, laneAt, los, findPath, nearestWalk,
+    districtAt, inPark, walkable, policeOk, solidChor, solidPolice, laneAt, los, findPath, nearestWalk, safeSpot,
   };
 }

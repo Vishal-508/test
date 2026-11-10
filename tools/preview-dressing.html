@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dressing preview</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0a0f1c; color: #cfd6ea; font: 12px/1.4 system-ui, sans-serif; overflow: hidden; }
+  canvas#c { display: block; width: 100vw; height: 100vh; }
+  #hud { position: fixed; left: 10px; top: 8px; right: 10px; pointer-events: none; text-shadow: 0 1px 2px #000; white-space: pre-wrap; }
+  #hud b { color: #ffd98a; }
+  #bar { position: fixed; left: 10px; bottom: 8px; display: flex; gap: 6px; flex-wrap: wrap; }
+  button { font: inherit; background: #1a2238; color: #cfd6ea; border: 1px solid #36405e; border-radius: 6px; padding: 4px 9px; cursor: pointer; }
+  #atlas { position: fixed; right: 8px; bottom: 8px; width: 512px; border: 1px solid #36405e; display: none; background: #000; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud"></div>
+<div id="bar"></div>
+<canvas id="atlas"></canvas>
+<script type="module">
+// Preview for js/dressing.js: the real world from js/world.js with every building as a plain box, the street lamps,
+// the hideout bays (violet slabs) and a grey stand-in car, then buildDressing() on top.
+// Lighting, fog, tone mapping and the chase camera copy what js/game.js does at the time of writing.
+// URL options:
+//   view=sarafa|ring|over|low|hide|free   x= y= a=   place the stand-in car (map units, heading in radians)
+//   cam=px,py,pz,tx,ty,tz                 free camera (with view=free)
+//   post=0      plain rendering instead of the game's bloom (js/postfx.js)
+//   real=1      the game's own building material (lit windows, shop shutters) instead of plain boxes
+//   cut=1       hand ctx.U to buildDressing and cut the see-through circle round the car, as the game does
+//   t=<seconds> freeze time     atlas=1 show the sign atlas     head=0 no headlight     dress=0 leave the dressing out
+// Keys: arrows drive the stand-in car, V next view, A atlas.
+import * as THREE from '../vendor/three.module.min.js';
+import * as WORLD from '../js/world.js';
+import { buildDressing } from '../js/dressing.js';
+
+const Q = new URLSearchParams(location.search);
+const num = (k, d) => (Q.has(k) && Q.get(k) !== '' && !isNaN(+Q.get(k)) ? +Q.get(k) : d);
+const hud = document.getElementById('hud'), bar = document.getElementById('bar');
+const N = WORLD.N || 200, CS = WORLD.CS || 0.5, T = WORLD.T || { WALK: 0, BLDG: 1, WATER: 2, BAY: 5 };
+const hash2 = WORLD.hash2 || ((i, j) => { let n = Math.imul(i | 0, 374761393) + Math.imul(j | 0, 668265263); n = Math.imul(n ^ (n >>> 13), 1274126177); return ((n ^ (n >>> 16)) >>> 0) / 4294967296; });
+
+const W = WORLD.buildWorld(await (await fetch('../data/map.json')).json());
+
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(1);
+renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.5;   // as js/postfx.js sets it
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0a0f1c);
+scene.fog = new THREE.Fog(0x0a0f1c, 16, 52);
+const camera = new THREE.PerspectiveCamera(52, 1, 1.6, 180);
+scene.add(new THREE.HemisphereLight(0x8d93ab, 0x4c4850, 1.55));
+const moon = new THREE.DirectionalLight(0xc6ceff, 1.05); moon.position.set(-30, 40, 45); scene.add(moon);
+const headlamp = new THREE.SpotLight(0xfff1d0, num('head', 1) ? 16 : 0, 13, 0.56, 0.85, 1.0); scene.add(headlamp); scene.add(headlamp.target);
+const U = { uCut: { value: new THREE.Vector3(0.5, 0.5, -1) }, uRes: { value: new THREE.Vector2(1, 1) } };
+
+// ---- ground: roads a little lighter than the land under the buildings
+{
+  const cv = document.createElement('canvas'); cv.width = cv.height = 800;
+  const c = cv.getContext('2d'), px = 800 / N;
+  c.fillStyle = '#07090f'; c.fillRect(0, 0, 800, 800);
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+    const t = W.type[j * N + i];
+    if (t === T.WALK) c.fillStyle = '#272c3c'; else if (t === T.BAY) c.fillStyle = '#2a2444'; else if (t === T.WATER) c.fillStyle = '#0b2644'; else continue;
+    c.fillRect(i * px, j * px, px + 0.5, px + 0.5);
+  }
+  const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace;
+  const g = new THREE.Mesh(new THREE.PlaneGeometry(100, 100), new THREE.MeshLambertMaterial({ map: tex }));
+  g.material.color.setRGB(1.6, 1.55, 1.5); g.rotation.x = -Math.PI / 2; g.position.set(50, 0, 50); scene.add(g);
+}
+
+// ---- buildings: one instanced box each (or, with real=1, the game's own material in its two flavours)
+const dummy = new THREE.Object3D(), col = new THREE.Color();
+let realMat = null;
+if (num('real', 0)) { try { realMat = (await import('../js/scene.js')).makeBuildingMaterial; } catch (e) { console.warn('real=1: js/scene.js could not be loaded, using plain boxes', e); } }
+for (const win of realMat ? [1, 0] : [-1]) {
+  const list = win < 0 ? W.boxes : W.boxes.filter(b => !!b.win === !!win);
+  const im = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), realMat ? realMat(U, !!win) : new THREE.MeshLambertMaterial({ color: 0xffffff }), list.length);
+  list.forEach((b, k) => {
+    dummy.position.set(b.x + b.w / 2, b.h / 2, b.y + b.d / 2); dummy.scale.set(b.w, b.h, b.d); dummy.rotation.set(0, 0, 0); dummy.updateMatrix();
+    im.setMatrixAt(k, dummy.matrix); im.setColorAt(k, col.setHex(typeof b.c === 'number' ? b.c : 0x6a7088));
+  });
+  if (im.instanceColor) im.instanceColor.needsUpdate = true;
+  im.frustumCulled = false; scene.add(im);
+}
+// ---- street lamps (post and bulb) and hideout bays, so a board that hides behind one shows up
+{
+  const posts = (W.lamps || []).filter(p => p.post);
+  const poles = new THREE.InstancedMesh(new THREE.BoxGeometry(0.06, 1.5, 0.06), new THREE.MeshLambertMaterial({ color: 0x3a4050 }), posts.length);
+  const bulbs = new THREE.InstancedMesh(new THREE.SphereGeometry(0.1, 8, 6), new THREE.MeshBasicMaterial({ color: 0xffffff }), posts.length);
+  posts.forEach((p, k) => {
+    dummy.scale.set(1, 1, 1); dummy.rotation.set(0, 0, 0);
+    dummy.position.set(p.x, 0.75, p.y); dummy.updateMatrix(); poles.setMatrixAt(k, dummy.matrix);
+    dummy.position.set(p.x + p.dx * 0.5, 1.46, p.y + p.dy * 0.5); dummy.updateMatrix(); bulbs.setMatrixAt(k, dummy.matrix); bulbs.setColorAt(k, col.setHex(p.c));
+  });
+  if (bulbs.instanceColor) bulbs.instanceColor.needsUpdate = true;
+  poles.frustumCulled = bulbs.frustumCulled = false; scene.add(poles); scene.add(bulbs);
+  const bayMat = new THREE.MeshLambertMaterial({ color: 0x6a52b8 });
+  for (const h of (W.hides || [])) if (h.bay && !h.grove) { const m = new THREE.Mesh(new THREE.BoxGeometry(h.bay.x1 - h.bay.x0, 0.5, h.bay.y1 - h.bay.y0), bayMat); m.position.set((h.bay.x0 + h.bay.x1) / 2, 0.25, (h.bay.y0 + h.bay.y1) / 2); scene.add(m); }
+}
+// ---- the stand-in car
+const car = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.3, 0.86), new THREE.MeshLambertMaterial({ color: 0x9aa0aa }));
+scene.add(car);
+
+// ---- the module under test
+const useCut = !!num('cut', 0);
+const dressing = num('dress', 1) ? buildDressing(scene, W, useCut ? { hash2, U } : { hash2 }) : null;
+
+// ---- the game's bloom, when it can be loaded and the machine can run it
+let post = null;
+if (num('post', 1)) { try { post = (await import('../js/postfx.js')).makePost(renderer, scene, camera); post.setEnabled(true); } catch (e) { console.warn('js/postfx.js could not be used, rendering plainly', e); post = null; } }
+
+// ---- views
+const PRESET = {
+  sarafa: { x: 36, y: 30, a: Math.PI / 2, mode: 'chase' },     // along Sarafa Gali, heading east
+  ring: { x: 50, y: 22, a: Math.PI / 2, mode: 'chase' },       // along Gol Road at the Station Road crossing
+  low: { x: 36, y: 30, a: Math.PI / 2, mode: 'low' },          // the same street from bonnet height
+  over: { x: 44, y: 34, a: 0, mode: 'over' },                  // high above the Sarafa and the Kotwali
+  hide: { x: 36, y: 30, a: 0, mode: 'hide' },                  // as from inside a hideout: low, looking across the lane
+  free: { x: 36, y: 30, a: 0, mode: 'free' },
+};
+const viewName = PRESET[Q.get('view')] ? Q.get('view') : 'sarafa';
+const state = { view: viewName, mode: PRESET[viewName].mode, x: num('x', PRESET[viewName].x), y: num('y', PRESET[viewName].y), a: num('a', PRESET[viewName].a), time: num('t', 0), frozen: Q.has('t'), auto: true,
+  cam: (Q.get('cam') || '36,6,36,36,0.5,30').split(',').map(Number) };
+function placeCamera() {
+  const { x, y, a, mode } = state, fx = Math.sin(a), fz = Math.cos(a);
+  car.position.set(x, 0.15, y); car.rotation.y = a;
+  headlamp.position.set(x + fx * 0.2, 0.7, y + fz * 0.2); headlamp.target.position.set(x + fx * 6, 0, y + fz * 6);
+  camera.near = 1.6; camera.fov = 52;
+  const tx = x + fx * 0.7, tz = y + fz * 0.7;
+  if (mode === 'chase') { const D = 8.6, p = 0.84; camera.position.set(tx - fx * D * Math.cos(p), D * Math.sin(p), tz - fz * D * Math.cos(p)); camera.lookAt(tx, 0.3, tz); }   // the game's chase camera
+  else if (mode === 'low') { camera.near = 0.2; camera.position.set(tx - fx * 3.4, 1.15, tz - fz * 3.4); camera.lookAt(tx + fx * 4, 0.5, tz + fz * 4); }
+  else if (mode === 'hide') { camera.near = 0.06; camera.position.set(x, 0.46, y); camera.lookAt(x + fx * 3, 0.5, y + fz * 3); }
+  else if (mode === 'over') { camera.position.set(x + 4, 30, y + 30); camera.lookAt(x + 4, 0, y - 2); }
+  else { const c = state.cam; camera.near = 0.1; camera.position.set(c[0], c[1], c[2]); camera.lookAt(c[3], c[4], c[5]); }
+  camera.updateProjectionMatrix(); camera.updateMatrixWorld();
+  // the see-through circle round the car, exactly as js/game.js fills these uniforms
+  if (useCut && (mode === 'chase' || mode === 'free')) { v3.set(x, 0.25, y).project(camera); U.uCut.value.x = v3.x * 0.5 + 0.5; U.uCut.value.y = v3.y * 0.5 + 0.5; v3.set(x, 0.25, y).applyMatrix4(camera.matrixWorldInverse); U.uCut.value.z = -v3.z; }
+  else U.uCut.value.z = -1;
+}
+const v3 = new THREE.Vector3();
+function resize() { const w = innerWidth, h = innerHeight; renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix(); renderer.getDrawingBufferSize(U.uRes.value); if (post) post.setSize(w, h); }
+addEventListener('resize', resize); resize();
+
+let lastCalls = 0;
+function frame(dt, time) {
+  if (dressing) dressing.update(dt, time);
+  placeCamera();
+  if (post && post.enabled) post.render(dt); else renderer.render(scene, camera);
+  const s = dressing ? dressing.stats : {};
+  hud.innerHTML = `<b>${state.view}</b> car ${state.x.toFixed(1)}, ${state.y.toFixed(1)} heading ${state.a.toFixed(2)}  t=${time.toFixed(2)}  bloom ${post && post.enabled ? 'on' : 'off'}  buildings ${realMat ? 'game material' : 'plain'}  cut ${useCut ? 'on' : 'off'}
+signs ${s.signs} (flickering ${s.flickering})  hoardings ${s.hoardings}  glow quads ${s.glowQuads}  roof: ${s.tanks} tanks + ${s.stairHeads} stair-heads + ${s.aerials} aerials = ${s.roofInstances} instances
+draw calls ${s.drawCalls}  texture ${(s.textureBytes / 1048576).toFixed(2)} MB  Devanagari ${s.devanagari ? 'yes' : 'no (Latin fall-back)'}  atlas cells left out ${s.cellsLeftOut}`;
+}
+for (const v of Object.keys(PRESET)) { const b = document.createElement('button'); b.textContent = v; b.onclick = () => setView(v); bar.appendChild(b); }
+function setView(v) { state.view = v; state.mode = PRESET[v].mode; if (v !== 'low' && v !== 'hide' && v !== 'free') { state.x = PRESET[v].x; state.y = PRESET[v].y; state.a = PRESET[v].a; } }
+function showAtlas(on) {
+  const el = document.getElementById('atlas'), tex = dressing && dressing.group.children[0] && dressing.group.children[0].material.map;
+  if (!tex) return;
+  el.width = tex.image.width; el.height = tex.image.height; el.getContext('2d').drawImage(tex.image, 0, 0); el.style.display = on ? 'block' : 'none';
+}
+if (num('atlas', 0)) showAtlas(true);
+const keys = new Set();
+addEventListener('keydown', e => { keys.add(e.key); if (e.key === 'v') { const names = Object.keys(PRESET); setView(names[(names.indexOf(state.view) + 1) % names.length]); } if (e.key === 'a') showAtlas(document.getElementById('atlas').style.display !== 'block'); });
+addEventListener('keyup', e => keys.delete(e.key));
+
+let last = performance.now();
+function loop(now) {
+  requestAnimationFrame(loop);
+  if (!state.auto) return;
+  const dt = Math.min(0.1, (now - last) / 1000); last = now;
+  if (!state.frozen) state.time += dt;
+  if (keys.has('ArrowLeft')) state.a += dt * 1.8; if (keys.has('ArrowRight')) state.a -= dt * 1.8;
+  const sp = (keys.has('ArrowUp') ? 1 : 0) - (keys.has('ArrowDown') ? 1 : 0);
+  state.x += Math.sin(state.a) * sp * dt * 5; state.y += Math.cos(state.a) * sp * dt * 5;
+  frame(dt, state.time);
+}
+requestAnimationFrame(loop);
+
+// ---- checks and hooks for the Playwright script
+// Every board must lie flat on a wall that is at least as tall as the board's top edge, face a road,
+// keep the stated size limits, overlap no other board and hide behind no lamp post; every rooftop
+// item must stand wholly on its own roof and rise no more than 0.35 above it.
+function check() {
+  const out = { problems: [], boards: 0, roofItems: 0, vertices: 0 };
+  if (!dressing) return out;
+  const bad = (what, o) => { if (out.problems.length < 40) out.problems.push(what + ' ' + JSON.stringify(o, (k, v) => (k === 'box' ? undefined : typeof v === 'number' ? +v.toFixed(3) : v))); };
+  const typeAt = (x, z) => (x < 0 || z < 0 || x >= 100 || z >= 100 ? -1 : W.type[Math.floor(z / CS) * N + Math.floor(x / CS)]);
+  const boxAt = (x, z) => W.boxes.find(b => x >= b.x && x < b.x + b.w && z >= b.y && z < b.y + b.d);
+  const boards = dressing.debug.signs.map(s => Object.assign({ sign: true }, s)).concat(dressing.debug.hoardings);
+  for (const s of boards) {
+    out.boards++;
+    if (s.sign && (s.w < 0.9 - 1e-6 || s.w > 1.8 + 1e-6 || s.h < 0.22 - 1e-6 || s.h > 0.34 + 1e-6 || s.y0 < 0.45 || s.off > 0.05)) bad('size', s);
+    if (s.y1 > s.wallH - 0.03) bad('above roof line', s);
+    if (s.w > s.wallLen) bad('wider than its wall', s);
+    for (let k = 0; k <= 6; k++) {
+      const t = (k / 6 - 0.5) * s.w, px = s.x + s.nz * t, pz = s.z - s.nx * t;   // across the board, on the wall plane
+      const b = boxAt(px - s.nx * 0.1, pz - s.nz * 0.1);
+      if (!b || b.h < s.y1 - 1e-6) bad('no wall behind', s);
+      if (typeAt(px + s.nx * 0.2, pz + s.nz * 0.2) !== T.WALK) bad('does not face a road', s);
+    }
+    for (const p of (W.lamps || [])) if (p.post) { const sd = (p.x - s.x) * s.nz - (p.y - s.z) * s.nx, d = (p.x - s.x) * s.nx + (p.y - s.z) * s.nz; if (d > -0.1 && d < 0.4 && Math.abs(sd) < s.w / 2 + 0.05) bad('behind a lamp post', s); }
+    for (const o of boards) if (o !== s && o.nx === s.nx && o.nz === s.nz && Math.abs((o.x - s.x) * s.nx + (o.z - s.z) * s.nz) < 0.1 && Math.abs((o.x - s.x) * s.nz - (o.z - s.z) * s.nx) < (o.w + s.w) / 2 && o.y0 < s.y1 && s.y0 < o.y1) bad('overlaps another board', s);
+  }
+  for (const r of dressing.debug.roof) {
+    out.roofItems++;
+    const b = r.box;
+    if (r.x0 < b.x - 1e-6 || r.x1 > b.x + b.w + 1e-6 || r.z0 < b.y - 1e-6 || r.z1 > b.y + b.d + 1e-6) bad('hangs off its roof', r);
+    if (r.top > 0.35) bad('too tall', r);
+    if (b.h < 0.5 || b.style === 'bagh' || b.style === 'ghat') bad('wrong kind of roof', r);
+  }
+  // the real geometry: every vertex of the board and glow meshes stands over open ground, within 0.08 of a building (or on the road for the light pools)
+  for (const m of dressing.group.children) {
+    if (m.isInstancedMesh) continue;
+    const p = m.geometry.attributes.position;
+    for (let k = 0; k < p.count; k++) {
+      out.vertices++;
+      const x = p.getX(k), y = p.getY(k), z = p.getZ(k);
+      if (y < 0.019 || !isFinite(x + y + z)) bad('vertex below ground', { x, y, z });
+      if (y > 0.021) { const near = [[0.08, 0], [-0.08, 0], [0, 0.08], [0, -0.08]].some(o => typeAt(x + o[0], z + o[1]) === T.BLDG); if (!near) bad('vertex away from any wall', { x, y, z }); if (typeAt(x, z) === T.BLDG) bad('vertex inside a building', { x, y, z }); }
+      else if (typeAt(x, z) !== T.WALK && typeAt(x, z) !== T.BLDG) bad('light pool off the road', { x, y, z });
+    }
+  }
+  return out;
+}
+window.__pv = {
+  state, W, dressing, renderer, scene, camera, check,
+  // freeze the loop, set the view, draw a few frames; returns what the renderer reports
+  shot(o) {
+    state.auto = false; o = o || {};
+    if (o.view) setView(o.view);
+    for (const k of ['x', 'y', 'a', 'mode']) if (o[k] != null) state[k] = o[k];
+    if (o.cam) state.cam = o.cam;
+    const t = o.time != null ? o.time : state.time; state.time = t;
+    for (let i = 0; i < 3; i++) frame(0.016, t);
+    return { post: !!(post && post.enabled), stats: dressing ? dressing.stats : null };
+  },
+  // draw calls and triangles the dressing adds to a plain render of the current view
+  cost() {
+    if (!dressing) return null;
+    placeCamera();
+    dressing.group.visible = false; renderer.render(scene, camera); const a = { calls: renderer.info.render.calls, tris: renderer.info.render.triangles };
+    dressing.group.visible = true; renderer.render(scene, camera); const b = { calls: renderer.info.render.calls, tris: renderer.info.render.triangles };
+    return { calls: b.calls - a.calls, triangles: b.tris - a.tris, textures: renderer.info.memory.textures, geometries: renderer.info.memory.geometries };
+  },
+  atlasDataUrl() { const tex = dressing && dressing.group.children[0] && dressing.group.children[0].material.map; return tex ? tex.image.toDataURL('image/png') : null; },
+  flickerLevels(t) { dressing.update(0.016, t); return dressing.group.children.filter(m => !m.isInstancedMesh && m.renderOrder === 3).map(m => +m.material.color.r.toFixed(2)); },
+  // builds and disposes a second copy, to see that nothing is left behind
+  disposeTest() {
+    const before = { geometries: renderer.info.memory.geometries, textures: renderer.info.memory.textures, children: scene.children.length };
+    const d2 = buildDressing(scene, W, { hash2 }); renderer.render(scene, camera); d2.dispose(); d2.dispose(); renderer.render(scene, camera);
+    return { before, after: { geometries: renderer.info.memory.geometries, textures: renderer.info.memory.textures, children: scene.children.length } };
+  },
+  ready: true,
+};
+</script>
+</body>
+</html>
