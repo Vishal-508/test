@@ -13,6 +13,8 @@
 // In this right-handed frame the car's LEFT flank is +X and its RIGHT flank is -X.
 // Footprints (collision uses them): getaway car 0.84 long x 0.38 wide x 0.27 tall, jeep 0.86 x 0.42 x 0.36
 // (0.40 with the light bar).
+// Lamp lenses are MeshBasicMaterial with colours above 1 where they should bloom. The paint is a MeshStandardMaterial
+// with a small night-sky reflection map and one shader patch (see "Night sheen") that keeps dark paints readable.
 import * as THREE from '../vendor/three.module.min.js';
 
 // Getaway-car paints: moody ones first, then the loud ones.
@@ -258,7 +260,7 @@ function buildFx(K) {
 // A small three-box saloon of no particular make: round lamps, chrome bumpers, upright rear window.
 function buildChor() {
   const paint = newB(), trim = newB(), glass = newB(), head = newB(), tail = newB(), rev = newB();
-  const W = [1, 1, 1], SHUT = [0.3, 0.3, 0.3], HW = 0.186, WX = 0.166, WZ = 0.255, WR = 0.058;
+  const W = [1, 1, 1], SHUT = [0.3, 0.3, 0.3], HW = 0.186, WX = 0.1655, WZ = 0.255, WR = 0.058;   // hub caps end at x = 0.19
   const chrome = lin(0x9da3ad), black = lin(0x0b0c0f), dark = lin(0x16181c), cabin = lin(0x050608), amber = lin(0x8f4a0c), plate = lin(0xc9c7ba), steel = lin(0x4d5158);
 
   const rings = [
@@ -282,8 +284,8 @@ function buildChor() {
   for (const sz of [1, -1]) {
     box(trim, 0.352, 0.022, 0.02, 0, 0.069, sz * 0.409, chrome);
     for (const sx of [1, -1]) {
-      box(trim, 0.014, 0.022, 0.036, sx * 0.176, 0.069, sz * 0.396, chrome, 0, sx * sz * 0.5, 0);
-      box(trim, 0.012, 0.034, 0.008, sx * 0.075, 0.073, sz * 0.4175, dark);
+      box(trim, 0.014, 0.022, 0.036, sx * 0.175, 0.069, sz * 0.396, chrome, 0, sx * sz * 0.5, 0);
+      box(trim, 0.012, 0.034, 0.008, sx * 0.075, 0.073, sz * 0.416, dark);                              // overriders: the car ends at z = +-0.42
     }
   }
   box(trim, 0.176, 0.038, 0.004, 0, 0.112, 0.406, black);
@@ -305,7 +307,7 @@ function buildChor() {
     cyl(trim, 0.0075, 0.0075, 0.03, 8, sx * 0.08, 0.052, -0.404, steel, 'z');
   }
   box(trim, 0.33, 0.004, 0.014, 0, 0.1705, 0.157, black);                                           // scuttle under the windscreen
-  box(trim, 0.07, 0.019, 0.003, 0, 0.069, 0.4205, plate);
+  box(trim, 0.07, 0.019, 0.003, 0, 0.069, 0.4185, plate);
   box(trim, 0.07, 0.021, 0.003, 0, 0.108, -0.4065, plate);
   box(trim, 0.1, 0.004, 0.003, 0, 0.1335, -0.4065, chrome);
 
@@ -327,7 +329,7 @@ function buildChor() {
 const POLICE_WHITE = 0xb9c0cb, POLICE_BLUE = 0x17357f;
 function buildPolice() {
   const paint = newB(), trim = newB(), glass = newB(), head = newB(), tail = newB(), rev = newB(), barR = newB(), barB = newB();
-  const W = lin(POLICE_WHITE), BL = lin(POLICE_BLUE), SHUT = W.map(v => v * 0.35), HW = 0.198, WX = 0.179, WZ = 0.262, WR = 0.075;
+  const W = lin(POLICE_WHITE), BL = lin(POLICE_BLUE), SHUT = W.map(v => v * 0.35), HW = 0.198, WX = 0.1775, WZ = 0.262, WR = 0.075;   // hub caps end at x = 0.21
   const black = lin(0x0b0c0f), dark = lin(0x1b1d22), cabin = lin(0x050608), amber = lin(0x8f4a0c), plate = lin(0xc9c7ba), grey = lin(0x7b808a), steel = lin(0x3c4046);
 
   const rings = [
@@ -352,11 +354,11 @@ function buildPolice() {
   box(trim, 0.154, 0.014, 0.012, 0, 0.152, 0.424, black);
   box(trim, 0.2, 0.064, 0.004, 0, 0.166, 0.4105, black);
   for (const y of [0.146, 0.166, 0.186]) box(trim, 0.19, 0.006, 0.003, 0, y, 0.4125, grey);
-  box(trim, 0.078, 0.02, 0.003, 0, 0.106, 0.4295, plate);
+  box(trim, 0.078, 0.02, 0.003, 0, 0.106, 0.4285, plate);
   // back: bumper, spare wheel, plate
   box(trim, 0.40, 0.03, 0.026, 0, 0.1, -0.414, dark);
-  cyl(trim, 0.066, 0.066, 0.028, 14, 0, 0.194, -0.416, black, 'z');
-  cyl(trim, 0.034, 0.034, 0.032, 10, 0, 0.194, -0.416, grey, 'z');
+  cyl(trim, 0.066, 0.066, 0.028, 14, 0, 0.194, -0.414, black, 'z');
+  cyl(trim, 0.034, 0.034, 0.032, 10, 0, 0.194, -0.414, grey, 'z');                                  // the jeep ends at z = +-0.43
   box(trim, 0.078, 0.02, 0.003, 0, 0.1, -0.4285, plate);
   for (const sx of [1, -1]) {
     cyl(trim, 0.03, 0.03, 0.007, 12, sx * 0.138, 0.168, 0.4105, black, 'z');
@@ -365,8 +367,8 @@ function buildPolice() {
     box(tail, 0.03, 0.05, 0.008, sx * 0.168, 0.172, -0.407, [1, 1, 1]);
     box(rev, 0.03, 0.02, 0.008, sx * 0.168, 0.134, -0.407, [1, 1, 1]);
     // flanks: flares over the wheels, running board, mirror, door shuts and handles
-    for (const z of [WZ, -WZ]) { arch(trim, 0.093, sx * (HW + 0.0009), WR, z, black); box(trim, 0.016, 0.012, 0.2, sx * 0.203, 0.171, z, black); }
-    box(trim, 0.022, 0.012, 0.3, sx * 0.2, 0.09, 0, black);
+    for (const z of [WZ, -WZ]) { arch(trim, 0.093, sx * (HW + 0.0009), WR, z, black); box(trim, 0.016, 0.012, 0.2, sx * 0.202, 0.171, z, black); }
+    box(trim, 0.022, 0.012, 0.3, sx * 0.199, 0.09, 0, black);
     box(trim, 0.014, 0.03, 0.022, sx * 0.203, 0.236, 0.118, black);
     for (const z of [0.132, -0.06, -0.25]) box(paint, 0.002, 0.11, 0.005, sx * 0.1975, 0.158, z, SHUT);
     for (const z of [0.0, -0.19]) box(trim, 0.003, 0.006, 0.024, sx * 0.1985, 0.197, z, black);

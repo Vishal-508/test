@@ -133,6 +133,7 @@ function beginMatch(m) {
   S.cam.pos.set(me.v.x, 14, me.v.y + 10); S.cam.tgt.set(me.v.x, 0, me.v.y);
   S.hold = { key: '', t: 0 }; S.latch = true; S.paused = false; S.danger = 0; S.lastAlarm = null; S.lightningAt = 8 + Math.random() * 10; S.stuckT = 0; S.resetT = 0;
   $('feed').innerHTML = '';
+  hudCache = {}; $('status').className = 'pill'; $('status').textContent = '';
   $('role').textContent = me.role === 'chor' ? 'CHOR' : 'POLICE'; $('role').className = 'pill ' + me.role;
   $('btnAct').textContent = me.role === 'chor' ? 'HIDE' : 'SEARCH';
   $('btnLights').textContent = me.role === 'chor' ? 'Lights' : 'Siren';
@@ -354,7 +355,8 @@ function copTick(c, dt) {
     if (there && Math.abs(v.vf) < 0.6) { // parked outside: the officer walks up, shines a torch through the gaps, puts a hand on the bonnet
       const was = c.searchT; c.searchT += dt; S.searchLv[h.i] = clamp(c.searchT / HIDE.SEARCH, 0.05, 1);
       const occ = chors().find(p => p.hidden === h.i && !p.jailed);
-      if (was < HIDE.TOUCH && c.searchT >= HIDE.TOUCH && occ && (occ.blown || occ.engHot > 0 || (c.sawIn && c.sawIn.id === occ.id && c.sawIn.i === h.i))) { c.found = occ.id; S.searchFound[h.i] = 1; }
+      if (was < HIDE.TOUCH && c.searchT >= HIDE.TOUCH && occ && (occ.blown || occ.engHot > 0 || (c.sawIn && c.sawIn.id === occ.id && c.sawIn.i === h.i))) c.found = occ.id;
+      if (c.found) S.searchFound[h.i] = 1;
       if (c.searchT >= HIDE.SEARCH) {
         if (occ && c.found === occ.id) { occ.immune = 0; arrest(occ, null); }
         else if (occ) { ev({ t: 'safe', to: occ.id }); addHeat(occ, -1); }
@@ -382,6 +384,7 @@ function hostTick(dt) {
   for (const P of all) {
     if (P.immune > 0) P.immune -= dt;
     if (P.crashT > 0) P.crashT -= dt;
+    if (!P.isMe && performance.now() - P.net.t > 700) { P.net.vf = 0; P.v.vf = 0; P.nitroOn = false; }   // no word from them (tab hidden, bad link): they are not moving
     if (P.nitroOn) P.nitroAt = S.t;
     if (P.jailed) { P.jailLeft -= dt; if (P.jailLeft <= 0) release(P, 'bail'); }
     // hideouts: the door shuts behind a car that was let in; a parked engine cools; sit too long and an informer talks
@@ -481,6 +484,7 @@ function hostTick(dt) {
     if (rate > 0) { ch.bust = Math.min(1, ch.bust + rate * dt); if (ch.bust >= 1) { arrest(ch, by); if (S.over) return; } }
     else ch.bust = Math.max(0, ch.bust - BUST.DRAIN * dt);
   }
+  S.searchLv = {}; S.searchFound = {};   // rebuilt every tick by whoever is searching right now
   for (const c of S.cops) copTick(c, dt);
   // a police player searching a door: hot or blown cars are found at 3 seconds, cold ones only if they keep at it
   for (const p of pol) {
@@ -1124,9 +1128,9 @@ async function createRoom() {
         broadcastLobby();
       } else if (m.k === 'role') { const p = S.lobby.players.find(q => q.id === pid); if (p && S.screen === 'lobby' && (m.role === 'chor' || m.role === 'police')) { p.role = m.role; broadcastLobby(); } }
       else if (m.k === 'p') {
-        const P = S.players.get(pid); if (!P || P.jailed || m.q < P.tpSeq || S.screen !== 'play') return;
+        const P = S.players.get(pid); if (!P || P.jailed || !(m.q >= P.tpSeq) || S.screen !== 'play') return;
         if (typeof m.x !== 'number' || typeof m.y !== 'number' || !isFinite(m.x) || !isFinite(m.y)) return;
-        const n = P.net; n.x = clamp(m.x, 0, 100); n.y = clamp(m.y, 0, 100); n.a = +m.a || 0; n.vf = clamp(+m.v || 0, -3, 6); n.steer = clamp(+m.s || 0, -1, 1); n.t = performance.now();
+        const n = P.net; n.x = clamp(m.x, 0, 100); n.y = clamp(m.y, 0, 100); n.a = (+m.a || 0) % TAU; n.vf = clamp(+m.v || 0, -3, 6); n.steer = clamp(+m.s || 0, -1, 1); n.t = performance.now();
         P.nitroOn = !!(m.f & 1); P.lights = !!(m.f & 2); P.brake = !!(m.f & 4); P.drift = !!(m.f & 8); if (m.f & 16) P.crashT = 0.8;
       } else if (m.k === 'a') doAction(S.players.get(pid), String(m.t), m.i);
     },
@@ -1134,6 +1138,7 @@ async function createRoom() {
   });
   try {
     const code = await net.open();
+    if (S.screen !== 'menu' || S.net) { net.close(); $('btnCreate').disabled = false; return; }   // gave up waiting and started something else
     S.net = net; S.isHost = true; S.solo = false; S.myId = 'h';
     S.lobby = { code, players: [{ id: 'h', name: save.name, role: 'chor', paint: paintHex(save.paint) }] };
     $('menuErr').textContent = ''; setScreen('lobby'); renderLobby();
@@ -1154,7 +1159,7 @@ async function joinRoom() {
       if (m.k === 'lobby') { S.myId = m.you; S.lobby = { code: m.code, players: m.players }; if (S.screen !== 'lobby') { clearDyn(); setScreen('lobby'); } renderLobby(); }
       else if (m.k === 'start') beginMatch(m);
       else if (m.k === 's') applySnapshot(m);
-      else if (m.k === 'tp') { const me = S.me; if (me) { const v = me.v; v.x = m.x; v.y = m.y; v.a = +m.a || 0; v.vx = v.vy = v.vf = 0; me.tpSeq = m.q; me.scr = null; S.cam.yaw = Math.PI - v.a; } }
+      else if (m.k === 'tp') { const me = S.me; if (me) { const v = me.v; v.x = m.x; v.y = m.y; v.a = +m.a || 0; v.vx = v.vy = v.vf = 0; me.tpSeq = m.q; me.scr = null; me.jailed = true; me.hidden = me.hiding = me.wasHidden = -1; S.cam.yaw = Math.PI - v.a; } }
       else if (m.k === 'note') feed(m.m);
       else if (m.k === 'busy') toMenu('That room is in the middle of a round. Try again in a few minutes.');
       else if (m.k === 'full') toMenu('That room is full (8 players).');
@@ -1164,6 +1169,7 @@ async function joinRoom() {
   });
   try {
     await net.connect(code);
+    if (S.screen !== 'menu' || S.net) { net.close(); $('btnJoin').disabled = false; return; }
     S.net = net; S.isHost = false; S.solo = false; S.hostHeard = performance.now();
     net.send({ k: 'hello', name: save.name, paint: paintHex(save.paint), v: CFG.PROTO });
     $('menuErr').textContent = 'Connected. Waiting for the room…';
@@ -1284,7 +1290,7 @@ function hostLoop() {
   if (S.screen !== 'play' || !S.isHost || S.paused || S.over) { lastHost = now; return; }
   let rem = Math.min((now - lastHost) / 1000, 1.2); lastHost = now;
   // with the tab in the background no frames are drawn, so place the other players straight from their last report
-  if (document.hidden) for (const P of S.players.values()) if (!P.isMe) { P.v.x = P.net.x; P.v.y = P.net.y; P.v.a = P.net.a; P.v.vf = P.net.vf; }
+  if (document.hidden) for (const P of S.players.values()) { if (!P.isMe) { P.v.x = P.net.x; P.v.y = P.net.y; P.v.a = P.net.a; P.v.vf = P.net.vf; } else { P.v.vx = P.v.vy = P.v.vf = 0; } }
   while (rem > 1e-4 && !S.over) { const h = Math.min(0.02, rem); hostTick(h); rem -= h; }
   if (!S.solo && S.net && now - S.lastSnap >= 60 && !S.over) { // chors get the full picture; police are not told where hidden cars are
     S.lastSnap = now; const full = snapshot(false), fog = snapshot(true);

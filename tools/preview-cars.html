@@ -23,7 +23,9 @@
 // (same hemisphere and moon lights, the player's headlamp spotlight on the first car, the red/blue siren point lights
 // on the wailing jeep, and the game's own post-processing from js/postfx.js when it can be loaded).
 // Drag to orbit, wheel to zoom.
-// URL options: ?view=chase|close|rear|side|top|one|jeep|front|hero|ghost  &post=0  &dim=0.6  &t=1.25 (freeze time)  &tags=0  &lamps=0
+// URL options: ?view=chase|close|rear|side|top|one|jeep|jeepR|front|hero|ghost  &post=0  &dim=0.6  &t=1.25 (freeze time)  &tags=0  &lamps=0
+//              &cam=px,py,pz,tx,ty,tz (camera position and target; add &car=3 to make them relative to car 3 in the row)
+//              e.g. ?car=0&cam=0,6.4,-5.74,0,0,0.6 is the game's chase camera (8.6 units away, 48 degrees up) behind the first car
 import * as THREE from '../vendor/three.module.min.js';
 import { PAINTS, makeCar } from '../js/cars.js';
 
