@@ -4,6 +4,8 @@ import * as THREE from '../vendor/three.module.min.js';
 import { N, CS, T, LANE, hash2 } from './world.js?v=4';
 import { buildHideout, kindFor } from './hideouts.js?v=4';
 import { CFG } from './config.js?v=4';
+import { makeCar } from './cars.js?v=4';
+import { canDrawKana } from './ambient.js?v=4';
 
 const FONT = '"Baloo 2","Trebuchet MS","Segoe UI",sans-serif';
 
@@ -51,12 +53,49 @@ function drawLanes(l, S, map, W, clipMask) {
   for (const g of W.galis) { stroke(g.points, 1.54, '#2a2228'); }
   for (const r of kinds('street')) stroke(r.points, 2.04, r.name === 'Bagh ki Pagdandi' ? '#3d3c35' : '#2e3447');
   for (const r of kinds('plank')) { stroke(r.points, 1.6, '#5e4a34'); stroke(r.points, 1.6, 'rgba(0,0,0,0.25)', [0.12, 0.3]); }
-  for (const r of kinds('main')) stroke(r.points, 3.06, '#3a4259');
-  for (const r of kinds('main')) { stroke(r.points, 2.76, '#30374b'); stroke(r.points, 0.1, '#9aa1b8', [1.0, 1.4]); }
+  if (LY.roadStyle === 'jp') {
+    // narrow streets: asphalt wall to wall, a white line down each side marking the strip people walk in
+    for (const r of kinds('street')) { stroke(r.points, 2.04, '#2a2e39'); stroke(r.points, 1.66, 'rgba(226,229,236,0.6)'); stroke(r.points, 1.54, '#2a2e39'); }
+    // big roads: paved pavement with a yellow guide strip, kerb, white edge lines, orange centre line
+    for (const r of kinds('main')) stroke(r.points, 3.06, '#484c58');
+    for (const r of kinds('main')) { stroke(r.points, 2.74, 'rgba(214,170,40,0.5)'); stroke(r.points, 2.62, '#484c58'); stroke(r.points, 2.38, '#8a8e9a'); stroke(r.points, 2.3, '#292d38'); stroke(r.points, 2.04, 'rgba(230,232,238,0.6)'); stroke(r.points, 1.94, '#292d38'); }
+    // stop lines and the word painted on the road where a side street meets a bigger road
+    const kana = canDrawKana(), word = kana ? ['止', 'ま', 'れ'] : ['S', 'T', 'O', 'P'];
+    const HWQ = { main: 1.5, street: 1.0 }, HWR = { street: 1.0, alley: 0.8 };
+    const near = (p, q) => { for (let k = 1; k < q.points.length; k++) { const a = q.points[k - 1], b = q.points[k], dx = b.x - a.x, dy = b.y - a.y, L2 = dx * dx + dy * dy || 1, t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / L2)); if (Math.hypot(p.x - a.x - dx * t, p.y - a.y - dy * t) < 0.15) return true; } return false; };
+    for (const r of map.roads) {
+      if (!HWR[r.kind] || r.points.length < 2) continue;
+      for (const end of [0, 1]) {
+        const p = end ? r.points[r.points.length - 1] : r.points[0], o = end ? r.points[r.points.length - 2] : r.points[1];
+        const Ln = Math.hypot(p.x - o.x, p.y - o.y); if (Ln < 5) continue;
+        const dx = (p.x - o.x) / Ln, dy = (p.y - o.y) / Ln;
+        const q = map.roads.find(c => c !== r && HWQ[c.kind] && (c.kind === 'main' || r.kind === 'alley') && near(p, c)); if (!q) continue;
+        const back = HWQ[q.kind] + 0.2, hw = HWR[r.kind];
+        l.save(); l.translate((p.x - dx * back) * S, (p.y - dy * back) * S); l.rotate(Math.atan2(dx, -dy));
+        l.fillStyle = 'rgba(232,234,240,0.78)'; l.fillRect(-(hw - 0.2) * S, 0, (hw * 2 - 0.4) * S, 0.11 * S);
+        if (r.kind === 'street') {
+          const ch = 0.62 * S; l.font = `700 ${ch.toFixed(1)}px "Noto Sans JP","Hiragino Sans","Yu Gothic","Meiryo",sans-serif`; l.textAlign = 'center'; l.textBaseline = 'middle'; l.fillStyle = 'rgba(232,234,240,0.72)';
+          word.forEach((c, i) => { l.save(); l.translate(0, (0.62 + i * (kana ? 0.7 : 0.5)) * S); l.scale(kana ? 1 : 0.8, kana ? 1.25 : 1); l.fillText(c, 0, 0); l.restore(); });
+        }
+        l.restore();
+      }
+    }
+    for (const r of kinds('main')) stroke(r.points, 0.08, '#d9902a');
+    // manhole covers
+    for (let k = 0; k < 160; k++) { const x = hash2(k, 131) * 100, y = hash2(k, 137) * 100; if (!W.walkable(x, y) || W.laneAt(x, y) < LANE.ALLEY) continue; l.fillStyle = 'rgba(12,13,17,0.8)'; l.beginPath(); l.arc(x * S, y * S, 0.16 * S, 0, 7); l.fill(); l.strokeStyle = 'rgba(120,124,136,0.5)'; l.lineWidth = 0.03 * S; l.stroke(); }
+  } else {
+    for (const r of kinds('main')) stroke(r.points, 3.06, '#3a4259');
+    for (const r of kinds('main')) { stroke(r.points, 2.76, '#30374b'); stroke(r.points, 0.1, '#9aa1b8', [1.0, 1.4]); }
+  }
   for (const r of kinds('bridge')) stroke(r.points, 3.06, '#40485f');
   // zebra crossings
   l.fillStyle = 'rgba(214,220,235,0.5)';
   for (const z of (LY.crossings || [])) {
+    if (z.len) { // a crossing at an angle: { cx, cy, len, w, ang }
+      l.save(); l.translate(z.cx * S, z.cy * S); l.rotate(z.ang);
+      for (let x = -z.len / 2; x < z.len / 2 - 0.2; x += 0.55) l.fillRect(x * S, -z.w / 2 * S, 0.28 * S, z.w * S);
+      l.restore(); continue;
+    }
     const w = z.x1 - z.x0, h = z.y1 - z.y0;
     if (w >= h) for (let x = z.x0 + 0.15; x < z.x1 - 0.2; x += 0.55) l.fillRect(x * S, z.y0 * S, 0.28 * S, h * S);
     else for (let y = z.y0 + 0.15; y < z.y1 - 0.2; y += 0.55) l.fillRect(z.x0 * S, y * S, w * S, 0.28 * S);
@@ -122,6 +161,16 @@ export function paintGround(size, map, W) {
     e.fillStyle = g; e.fillRect((x - r) * S, (y - r) * S, 2 * r * S, 2 * r * S);
   };
   for (const p of W.lamps) glow(p.x + p.dx * 0.5, p.y + p.dy * 0.5, p.r, p.c, p.post ? 0.3 : 0.17);
+  for (const f of W.facades) { // light spilling out of shopfronts onto the pavement
+    if (f.fs !== 3 && f.fs !== 5) continue;
+    const tx = -f.ny, ty = f.nx, hl = f.len / 2, reach = f.fs === 5 ? 1.3 : 1.0;
+    const g = e.createLinearGradient(f.x * S, f.y * S, (f.x + f.nx * reach) * S, (f.y + f.ny * reach) * S);
+    const cool = hash2(Math.round(f.x * 4), Math.round(f.y * 4)) > 0.7 || f.fs === 5;
+    g.addColorStop(0, cool ? 'rgba(200,225,255,0.34)' : 'rgba(255,214,150,0.3)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+    e.fillStyle = g; e.beginPath();
+    e.moveTo((f.x - tx * hl) * S, (f.y - ty * hl) * S); e.lineTo((f.x + tx * hl) * S, (f.y + ty * hl) * S);
+    e.lineTo((f.x + tx * hl + f.nx * reach) * S, (f.y + ty * hl + f.ny * reach) * S); e.lineTo((f.x - tx * hl + f.nx * reach) * S, (f.y - ty * hl + f.ny * reach) * S); e.closePath(); e.fill();
+  }
   for (const s of W.sites) glow(s.x, s.y, 2.0, 0xf3b43f, 0.16);
   for (const x of W.escapes) glow(x.x, x.y, 2.6, 0x3bc98b, 0.16);
   for (const p of W.posts) glow(p.x, p.y, 2.6, 0x6a98ff, 0.22);
@@ -177,26 +226,177 @@ export function makeLabel(text, opts = {}) {
 }
 
 // ---------------------------------------------------------------- building material: lit windows + see-through circle around the player's car
+// Dark roof tiles in rows, for the pitched roofs of old houses. Has the same see-through circle round the player's car as the walls.
+export function makeTileMaterial(U) {
+  const mat = new THREE.MeshLambertMaterial({ color: 0x41444f });
+  mat.onBeforeCompile = sh => {
+    sh.uniforms.uCut = U.uCut; sh.uniforms.uRes = U.uRes;
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vWPos;\nvarying float vDepthC;')
+      .replace('#include <project_vertex>', `#include <project_vertex>
+        vec4 wpC = vec4( transformed, 1.0 );
+        #ifdef USE_INSTANCING
+          wpC = instanceMatrix * wpC;
+        #endif
+        vWPos = ( modelMatrix * wpC ).xyz;
+        vDepthC = - mvPosition.z;`);
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vWPos;\nvarying float vDepthC;\nuniform vec3 uCut;\nuniform vec2 uRes;')
+      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+        {
+          vec2 spC = gl_FragCoord.xy / uRes;
+          float cdC = length( ( spC - uCut.xy ) * vec2( uRes.x / uRes.y, 1.0 ) );
+          if ( vDepthC < uCut.z - 0.2 && cdC < 0.15 ) {
+            if ( cdC < 0.105 || mod( floor( gl_FragCoord.x ) + floor( gl_FragCoord.y ), 2.0 ) < 0.5 ) discard;
+          }
+          float farC = clamp( ( vDepthC - 18.0 ) / 16.0, 0.0, 1.0 );
+          diffuseColor.rgb *= mix( 0.72 + 0.42 * step( 0.4, fract( vWPos.y * 12.0 ) ), 0.93, farC );
+        }`);
+  };
+  mat.customProgramCacheKey = () => 'tile1';
+  return mat;
+}
+
+// What the front of a building looks like, by kind (set per building in js/world.js as `fs`):
+//   1 office block with ribbons of glass   2 flats with balconies   3 narrow block of bars and shops, a lit sign on every floor
+//   4 old wooden house                     5 bright single-storey shop                6 warehouse
+const FRONTS = `
+              float yC = vWPos.y, FLC = 0.62, dC = vDepthC, bidC = floor( vBid + 0.5 ) / 251.0;
+              float flC = floor( yC / FLC ), fyC = fract( yC / FLC );
+              vec3 baseC = diffuseColor.rgb;
+              if ( vSty < 1.5 ) {
+                float cxC = fract( uC / 0.45 ), colC = floor( uC / 0.45 );
+                if ( flC < 0.5 ) {
+                  float gC = step( 0.06, cxC ) * step( cxC, 0.94 ) * step( 0.06, fyC ) * step( fyC, 0.82 );
+                  float lobC = step( 0.45, hsC( vec2( floor( uC / 1.8 ), sideC + bidC * 37.0 ) ) );
+                  diffuseColor.rgb = mix( baseC * 0.8, vec3( 0.05, 0.07, 0.1 ), gC );
+                  totalEmissiveRadiance += vec3( 1.0, 0.9, 0.72 ) * gC * lobC * ( 0.3 + 0.25 * fyC );
+                } else {
+                  float gC = step( 0.07, cxC ) * step( cxC, 0.93 ) * step( 0.2, fyC ) * step( fyC, 0.86 );
+                  float rC = hsC( vec2( colC, flC * 13.0 + sideC + bidC * 71.0 ) );
+                  float clC = hsC( vec2( floor( colC / 3.0 ), flC + sideC + bidC * 13.0 ) );
+                  float litC = step( 0.64, rC * 0.45 + clC * 0.55 );
+                  diffuseColor.rgb = mix( baseC, vec3( 0.06, 0.09, 0.14 ), gC );
+                  float tubeC = 0.55 + 0.45 * step( 0.78, fyC ) * step( fyC, 0.84 );   // strip lights on the ceiling show through the glass
+                  totalEmissiveRadiance += mix( vec3( 0.9, 0.95, 1.0 ), vec3( 1.0, 0.85, 0.6 ), step( 0.8, rC ) ) * gC * litC * 0.5 * tubeC;
+                  totalEmissiveRadiance += vec3( 0.025, 0.04, 0.075 ) * gC * ( 1.0 - litC );
+                }
+              } else if ( vSty < 2.5 ) {
+                float uxC = fract( uC / 1.0 ), unC = floor( uC / 1.0 );
+                float rC = hsC( vec2( unC, flC * 17.0 + sideC + bidC * 43.0 ) );
+                if ( flC < 0.5 ) {
+                  float dC2 = step( 0.3, uxC ) * step( uxC, 0.7 ) * step( fyC, 0.74 ) * step( 0.75, hsC( vec2( unC, sideC + bidC * 5.0 ) ) );
+                  diffuseColor.rgb = mix( baseC * 0.85, vec3( 0.08, 0.09, 0.11 ), dC2 );
+                  totalEmissiveRadiance += vec3( 1.0, 0.92, 0.75 ) * dC2 * 0.5;
+                } else {
+                  float railC = step( fyC, 0.4 );
+                  diffuseColor.rgb = mix( baseC * 0.45, baseC * 1.1, railC );
+                  diffuseColor.rgb *= mix( 1.0, strC( uC, 16.0, 0.3, dC ) * 0.3 + 0.78, railC * step( 0.12, fyC ) );   // balcony railing bars
+                  diffuseColor.rgb = mix( diffuseColor.rgb, baseC * 0.9, clamp( step( uxC, 0.04 ) + step( 0.96, uxC ), 0.0, 1.0 ) );
+                  float wC = ( 1.0 - railC ) * step( 0.12, uxC ) * step( uxC, 0.7 ) * step( fyC, 0.92 );
+                  float paneC = 1.0 - 0.75 * step( abs( uxC - 0.41 ), 0.012 );
+                  float litC = step( 0.6, rC );
+                  float curC = mix( 1.0, 0.45 + 0.3 * strC( uC, 22.0, 0.5, dC ), step( 0.5, fract( rC * 7.0 ) ) * step( uxC, 0.41 ) );   // a curtain half drawn
+                  totalEmissiveRadiance += mix( vec3( 1.0, 0.76, 0.46 ), vec3( 0.72, 0.86, 1.0 ), step( 0.9, rC ) ) * wC * litC * 0.5 * paneC * curC;
+                  diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.05, 0.06, 0.08 ), wC * ( 1.0 - litC ) );
+                  float acC = railC * step( 0.74, uxC ) * step( uxC, 0.9 ) * step( 0.1, fyC ) * step( fyC, 0.34 ) * step( 0.3, rC );
+                  diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.5, 0.52, 0.55 ), acC );
+                }
+              } else if ( vSty < 3.5 ) {
+                float bxC = fract( uC / 0.9 ), bayC = floor( uC / 0.9 );
+                if ( flC < 0.5 ) {
+                  float rC = hsC( vec2( bayC, sideC + bidC * 97.0 ) );
+                  float gC = step( 0.07, bxC ) * step( bxC, 0.93 ) * step( 0.05, fyC ) * step( fyC, 0.74 );
+                  float openC = step( 0.28, rC );
+                  vec3 lightC = mix( vec3( 1.0, 0.84, 0.58 ), vec3( 0.76, 0.9, 1.0 ), step( 0.72, rC ) );
+                  float frameC = 1.0 - 0.8 * clamp( step( abs( bxC - 0.5 ), 0.012 ) + step( abs( fyC - 0.56 ), 0.012 ), 0.0, 1.0 );   // door frame and a bar across
+                  float goodsC = 0.55 + 0.45 * strC( yC, 9.0, 0.5, dC ) * strC( uC, 7.0, 0.45, dC );   // shelves of goods inside
+                  vec3 shutC = vec3( 0.3, 0.31, 0.34 ) * ( 0.75 + 0.25 * strC( yC, 40.0, 0.5, dC ) );
+                  diffuseColor.rgb = mix( baseC * 0.7, mix( shutC, vec3( 0.1, 0.09, 0.08 ), openC ), gC );
+                  totalEmissiveRadiance += lightC * gC * openC * goodsC * frameC * 0.62;
+                  float clothC = step( 0.74, fyC ) * step( fyC, 0.92 ) * step( 0.04, bxC ) * step( bxC, 0.96 ) * step( 0.5, rC );
+                  vec3 awnC = mix( vec3( 0.55, 0.1, 0.1 ), vec3( 0.1, 0.2, 0.45 ), step( 0.75, rC ) ) * ( 0.75 + 0.45 * strC( uC, 9.0, 0.5, dC ) );
+                  diffuseColor.rgb = mix( diffuseColor.rgb, awnC, clothC );
+                  totalEmissiveRadiance *= 1.0 - clothC;
+                } else {
+                  float rC = hsC( vec2( flC * 7.0 + bayC, sideC + bidC * 31.0 ) );
+                  float hueC = hsC( vec2( flC, sideC * 3.0 + bidC * 57.0 ) );
+                  vec3 sgnC = hueC < 0.22 ? vec3( 1.0, 0.24, 0.6 ) : hueC < 0.44 ? vec3( 0.2, 0.88, 1.0 ) : hueC < 0.64 ? vec3( 1.0, 0.69, 0.18 ) : hueC < 0.8 ? vec3( 0.3, 1.0, 0.48 ) : vec3( 0.95, 0.96, 1.0 );
+                  float hasC = step( 0.3, hsC( vec2( flC + 3.0, bidC * 91.0 + sideC ) ) );
+                  float bandC = step( fyC, 0.27 ) * step( 0.03, fyC );
+                  float chC = step( 0.42, hsC( vec2( floor( uC * 5.5 ), flC + sideC ) ) ) * step( 0.08, fyC ) * step( fyC, 0.22 ) * step( 0.12, fract( uC * 5.5 ) );
+                  diffuseColor.rgb = mix( baseC, vec3( 0.07, 0.07, 0.09 ), bandC );
+                  totalEmissiveRadiance += sgnC * bandC * hasC * ( 0.16 + 0.8 * chC );
+                  float wC = step( 0.36, fyC ) * step( fyC, 0.9 ) * step( 0.1, bxC ) * step( bxC, 0.9 );
+                  float paneC = 1.0 - 0.8 * clamp( step( abs( bxC - 0.5 ), 0.014 ) + step( abs( bxC - 0.3 ), 0.01 ) + step( abs( bxC - 0.7 ), 0.01 ), 0.0, 1.0 );
+                  float litC = step( 0.45, rC );
+                  float blindC = mix( 1.0, 0.5 + 0.4 * strC( yC, 30.0, 0.5, dC ), step( 0.6, fract( rC * 5.0 ) ) );
+                  vec3 wcC = mix( vec3( 1.0, 0.8, 0.5 ), mix( vec3( 1.0, 0.4, 0.7 ), vec3( 0.5, 0.8, 1.0 ), step( 0.5, hsC( vec2( bayC, flC ) ) ) ), step( 0.78, rC ) );
+                  totalEmissiveRadiance += wcC * wC * litC * 0.5 * paneC * blindC;
+                  diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.05, 0.06, 0.09 ), wC * ( 1.0 - litC ) );
+                }
+              } else if ( vSty < 4.5 ) {
+                vec3 woodC = vec3( 0.2, 0.13, 0.09 ), plasC = vec3( 0.6, 0.56, 0.48 );
+                float bxC = fract( uC / 0.8 ), bayC = floor( uC / 0.8 );
+                if ( yC < FLC ) {
+                  float slatC = strC( uC, 14.0, 0.5, dC );
+                  float rC = hsC( vec2( bayC, sideC + bidC * 29.0 ) );
+                  float shC = step( 0.1, bxC ) * step( bxC, 0.9 ) * step( 0.12, fyC ) * step( fyC, 0.8 );
+                  diffuseColor.rgb = woodC * ( 0.7 + 0.5 * slatC );
+                  totalEmissiveRadiance += vec3( 1.0, 0.72, 0.38 ) * shC * step( 0.45, rC ) * ( 0.14 + 0.36 * slatC );
+                  float norC = step( 0.6, fyC ) * step( fyC, 0.82 ) * step( 0.16, bxC ) * step( bxC, 0.84 ) * step( 0.78, rC );
+                  diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.1, 0.15, 0.4 ) * ( 0.8 + 0.6 * step( 0.72, fract( uC * 5.0 ) ) ), norC );
+                  totalEmissiveRadiance *= 1.0 - norC;
+                } else {
+                  float beamC = clamp( step( bxC, 0.07 ) + step( abs( yC - FLC ), 0.035 ) + step( vBh - 0.06, yC ), 0.0, 1.0 );
+                  float wC = step( 0.25, bxC ) * step( bxC, 0.75 ) * step( FLC + 0.13, yC ) * step( yC, FLC + 0.4 );
+                  float litC = step( 0.55, hsC( vec2( bayC, 5.0 + sideC + bidC * 11.0 ) ) );
+                  diffuseColor.rgb = mix( plasC * 0.7, woodC, beamC );
+                  diffuseColor.rgb = mix( diffuseColor.rgb, woodC * 0.5, wC * ( 1.0 - litC ) );
+                  totalEmissiveRadiance += vec3( 1.0, 0.75, 0.42 ) * wC * litC * ( 0.22 + 0.28 * strC( uC, 12.0, 0.5, dC ) );
+                }
+              } else if ( vSty < 5.5 ) {
+                float mulC = step( 0.04, fract( uC / 0.6 ) );
+                float gC = step( 0.05, yC ) * step( yC, 0.46 ) * mulC;
+                float fasC = step( 0.5, yC ) * step( yC, 0.66 );
+                diffuseColor.rgb = mix( baseC, vec3( 0.9 ), gC );
+                totalEmissiveRadiance += vec3( 0.95, 0.98, 1.0 ) * gC * ( 0.45 + 0.25 * strC( yC, 9.0, 0.5, dC ) );
+                vec3 stripeC = yC < 0.553 ? vec3( 0.2, 0.75, 0.35 ) : yC < 0.607 ? vec3( 0.95 ) : vec3( 0.2, 0.45, 0.95 );
+                diffuseColor.rgb = mix( diffuseColor.rgb, stripeC, fasC );
+                totalEmissiveRadiance += stripeC * fasC * 0.6;
+              } else {
+                float corC = 0.8 + 0.2 * strC( uC, 9.0, 0.5, dC );
+                float dxC = fract( uC / 2.4 );
+                float doorC = step( 0.2, dxC ) * step( dxC, 0.62 ) * step( yC, 0.5 );
+                diffuseColor.rgb = mix( baseC * corC, baseC * 0.45 * ( 0.8 + 0.2 * strC( yC, 18.0, 0.5, dC ) ), doorC );
+                float lampC = step( abs( dxC - 0.41 ), 0.035 ) * step( 0.54, yC ) * step( yC, 0.6 );
+                totalEmissiveRadiance += vec3( 1.0, 0.85, 0.55 ) * lampC * 1.2;
+              }
+              diffuseColor.rgb *= 1.0 - 0.3 * step( vBh - 0.06, yC ) * step( vSty, 3.5 );`;
+
 export function makeBuildingMaterial(U, windows) {
   const mat = new THREE.MeshLambertMaterial({ color: 0xffffff });
   mat.onBeforeCompile = sh => {
     sh.uniforms.uCut = U.uCut; sh.uniforms.uRes = U.uRes;
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nvarying vec3 vWPos;\nvarying vec3 vONormal;\nvarying float vDepthC;\nvarying vec4 vRoof;')
+      .replace('#include <common>', '#include <common>\nattribute float aSty;\nvarying vec3 vWPos;\nvarying vec3 vONormal;\nvarying float vDepthC;\nvarying vec4 vRoof;\nvarying float vSty;\nvarying float vBh;\nvarying float vBid;')
       .replace('#include <project_vertex>', `#include <project_vertex>
         vec4 wpC = vec4( transformed, 1.0 );
         #ifdef USE_INSTANCING
           wpC = instanceMatrix * wpC;
           vec2 scC = vec2( length( instanceMatrix[ 0 ].xyz ), length( instanceMatrix[ 2 ].xyz ) );
           vRoof = vec4( position.x * scC.x, position.z * scC.y, scC );
+          vSty = aSty; vBh = length( instanceMatrix[ 1 ].xyz );
+          vBid = floor( fract( sin( dot( instanceMatrix[ 3 ].xz, vec2( 12.9898, 78.233 ) ) ) * 43758.5453 ) * 251.0 );   // a whole number, so it survives being passed across the face
         #else
           vRoof = vec4( 0.0, 0.0, 1000.0, 1000.0 );
+          vSty = 0.0; vBh = 1.0; vBid = 0.0;
         #endif
         vWPos = ( modelMatrix * wpC ).xyz;
         vONormal = normal;
         vDepthC = - mvPosition.z;`);
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying vec3 vWPos;\nvarying vec3 vONormal;\nvarying float vDepthC;\nvarying vec4 vRoof;\nuniform vec3 uCut;\nuniform vec2 uRes;')
+      .replace('#include <common>', '#include <common>\nvarying vec3 vWPos;\nvarying vec3 vONormal;\nvarying float vDepthC;\nvarying vec4 vRoof;\nvarying float vSty;\nvarying float vBh;\nvarying float vBid;\nuniform vec3 uCut;\nuniform vec2 uRes;\nfloat hsC( vec2 p ) { return fract( sin( dot( p, vec2( 12.9898, 78.233 ) ) ) * 43758.5453 ); }\nfloat lodC( float freq, float depth ) { return clamp( 2.0 - depth * freq / 70.0, 0.0, 1.0 ); }\nfloat strC( float x, float freq, float duty, float depth ) { return mix( 1.0 - duty, step( duty, fract( x * freq ) ), lodC( freq, depth ) ); }')
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
         {
           vec2 spC = gl_FragCoord.xy / uRes;
@@ -218,12 +418,17 @@ export function makeBuildingMaterial(U, windows) {
             roofC *= 1.0 - 0.45 * ( 1.0 - rimC ) * ( 1.0 - smoothstep( 0.1, 0.3, eC ) );
             roofC = mix( roofC, wallC * 0.78 + vec3( 0.03 ), rimC );
             float skyC = step( 0.955, rhC ) * step( 0.55, eC ) * step( 0.25, rfC.x ) * step( rfC.x, 0.75 ) * step( 0.3, rfC.y ) * step( rfC.y, 0.7 );
-            totalEmissiveRadiance += vec3( 1.0, 0.8, 0.5 ) * skyC * 0.55;
+            totalEmissiveRadiance += vec3( 1.0, 0.8, 0.5 ) * skyC * 0.55 * step( vSty, 3.5 );
             diffuseColor.rgb = roofC;
+            if ( vSty > 3.5 && vSty < 4.5 ) diffuseColor.rgb = vec3( 0.15, 0.16, 0.19 ) * ( 0.8 + 0.3 * step( 0.5, fract( vWPos.x * 5.0 ) ) );
           }
-          ${windows ? `else if ( abs( vONormal.y ) < 0.5 ) {
+          else if ( abs( vONormal.y ) < 0.5 ) {
             float uC = abs( vONormal.x ) > 0.5 ? vWPos.z : vWPos.x;
-            float sideC = abs( vONormal.x ) > 0.5 ? floor( vWPos.x * 2.0 ) : floor( vWPos.z * 2.0 ) + 31.0;
+            float sideC = abs( vONormal.x ) > 0.5 ? floor( vWPos.x * 2.0 + 0.5 ) : floor( vWPos.z * 2.0 + 0.5 ) + 31.0;
+            if ( vSty > 0.5 ) {
+${FRONTS}
+            }
+            ${windows ? `else {
             vec2 gC = vec2( uC * 3.1, vWPos.y * 3.4 );
             vec2 idC = floor( gC ); vec2 fC = fract( gC );
             float hC = fract( sin( dot( idC + sideC * 0.37, vec2( 12.9898, 78.233 ) ) ) * 43758.5453 );
@@ -238,21 +443,23 @@ export function makeBuildingMaterial(U, windows) {
             float doorC = shopC * step( 0.1, sgC ) * step( sgC, 0.9 );
             diffuseColor.rgb = mix( diffuseColor.rgb, diffuseColor.rgb * ( 0.55 + 0.25 * step( 0.5, fract( vWPos.y * 22.0 ) ) ), doorC );
             totalEmissiveRadiance += vec3( 1.0, 0.82, 0.5 ) * doorC * step( 0.9, shC ) * 0.4;
-          }` : ''}
+            }` : ''}
+          }
         }`);
   };
-  mat.customProgramCacheKey = () => 'bldg3' + (windows ? 1 : 0);
+  mat.customProgramCacheKey = () => 'bldg6' + (windows ? 1 : 0);
   return mat;
 }
 
 // ---------------------------------------------------------------- scene
 export function buildScene(scene, map, W, U, quality) {
-  const H = { siteVis: [], escVis: [], leverVis: [], hideVis: [] };
+  const H = { siteVis: [], escVis: [], leverVis: [], hideVis: [], cutMat: null };
   const lam = (color, extra) => new THREE.MeshLambertMaterial(Object.assign({ color }, extra || {}));
   const bas = (color, extra) => new THREE.MeshBasicMaterial(Object.assign({ color }, extra || {}));
   const box = (w, h, d, mat, x, y, z, parent) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat); m.position.set(x, y, z); (parent || scene).add(m); return m; };
   const cyl = (rt, rb, h, seg, mat, x, y, z, parent) => { const m = new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, h, seg), mat); m.position.set(x, y, z); (parent || scene).add(m); return m; };
   const cutMat = c => { const m = makeBuildingMaterial(U, false); m.color.setHex(c); return m; };
+  H.cutMat = cutMat;
   H.cutMat = cutMat;
 
   // ground: wet tarmac that picks up headlights and sirens
@@ -272,13 +479,34 @@ export function buildScene(scene, map, W, U, quality) {
   const dummy = new THREE.Object3D(), col = new THREE.Color();
   for (const win of [1, 0]) {
     const list = W.boxes.filter(b => !!b.win === !!win);
-    const im = new THREE.InstancedMesh(unit, makeBuildingMaterial(U, !!win), list.length);
+    const geo = unit.clone(), sty = new Float32Array(Math.max(1, list.length));
+    const im = new THREE.InstancedMesh(geo, makeBuildingMaterial(U, !!win), list.length);
     list.forEach((b, k) => {
       dummy.position.set(b.x + b.w / 2, b.h / 2, b.y + b.d / 2); dummy.scale.set(b.w, b.h, b.d); dummy.updateMatrix();
-      im.setMatrixAt(k, dummy.matrix); im.setColorAt(k, col.setHex(b.c));
+      im.setMatrixAt(k, dummy.matrix); im.setColorAt(k, col.setHex(b.c)); sty[k] = b.fs || 0;
     });
+    geo.setAttribute('aSty', new THREE.InstancedBufferAttribute(sty, 1));
     im.instanceMatrix.needsUpdate = true; if (im.instanceColor) im.instanceColor.needsUpdate = true;
     im.frustumCulled = false; scene.add(im);
+  }
+
+  // old wooden houses get a tiled roof with a ridge along the longer side
+  const gables = W.boxes.filter(b => b.gable);
+  if (gables.length) {
+    const pg = new THREE.BufferGeometry();
+    pg.setAttribute('position', new THREE.Float32BufferAttribute([
+      -0.5, 0, -0.5, -0.5, 0, 0.5, 0, 1, 0.5, -0.5, 0, -0.5, 0, 1, 0.5, 0, 1, -0.5,
+      0.5, 0, 0.5, 0.5, 0, -0.5, 0, 1, -0.5, 0.5, 0, 0.5, 0, 1, -0.5, 0, 1, 0.5,
+      -0.5, 0, 0.5, 0.5, 0, 0.5, 0, 1, 0.5, 0.5, 0, -0.5, -0.5, 0, -0.5, 0, 1, -0.5], 3));
+    pg.computeVertexNormals();
+    const rim = new THREE.InstancedMesh(pg, makeTileMaterial(U), gables.length);
+    gables.forEach((b, k) => {
+      const alongX = b.w >= b.d, span = alongX ? b.d : b.w, len = alongX ? b.w : b.d, rise = Math.min(0.7, 0.42 * span);
+      dummy.position.set(b.x + b.w / 2, b.h, b.y + b.d / 2); dummy.rotation.set(0, alongX ? Math.PI / 2 : 0, 0); dummy.scale.set(span + 0.26, rise, len + 0.14); dummy.updateMatrix();
+      rim.setMatrixAt(k, dummy.matrix);
+    });
+    dummy.rotation.set(0, 0, 0);
+    rim.instanceMatrix.needsUpdate = true; rim.frustumCulled = false; scene.add(rim);
   }
 
   // landmark footprints: merge marked cells into boxes
@@ -388,7 +616,7 @@ export function buildScene(scene, map, W, U, quality) {
         const fr = box(q.w + 0.16, q.h + 0.16, 0.05, lam(0x15171d), q.x - Math.sin(q.ry || 0) * 0.04, q.y0 + q.h / 2, q.y - Math.cos(q.ry || 0) * 0.04); fr.rotation.y = q.ry || 0;
         if (q.color2 != null) { const st = box(q.w * 0.86, q.h * 0.22, 0.1, bas(q.color2), q.x, q.y0 + q.h * 0.3, q.y); st.rotation.y = q.ry || 0; }
       } else if (q.type === 'lanterns') {  // a string of paper lanterns along a lane
-        const n = q.n || 10, im = new THREE.InstancedMesh(new THREE.SphereGeometry(0.09, 8, 6), bas(q.color || 0xff5a3a), n);
+        const n = q.n || 10, im = new THREE.InstancedMesh(new THREE.SphereGeometry(0.06, 8, 6), bas(q.color || 0xff5a3a), n);
         for (let k = 0; k < n; k++) { const f = (k + 0.5) / n; dummy.position.set(q.x0 + (q.x1 - q.x0) * f, (q.h || 1.15) - Math.sin(f * Math.PI) * 0.12, q.y0 + (q.y1 - q.y0) * f); dummy.rotation.set(0, 0, 0); dummy.scale.set(1, 1.25, 1); dummy.updateMatrix(); im.setMatrixAt(k, dummy.matrix); }
         im.frustumCulled = false; scene.add(im);
       } else if (q.type === 'label') tag(q.text, q.x, q.h || 2, q.y, q.color, q.size);
@@ -400,6 +628,10 @@ export function buildScene(scene, map, W, U, quality) {
     if (p.kind === 'bus') { box(w, 0.62, d, cutMat(p.c), cx, 0.39, cz); box(w * 0.92, 0.18, d + 0.02, bas(0x6f8796), cx, 0.5, cz); box(w * 0.96, 0.05, d * 0.9, lam(0xdedede), cx, 0.72, cz); }
     else if (p.kind === 'wagon') { box(w, 0.42, d, cutMat(p.c), cx, 0.33, cz); box(w * 0.94, 0.06, d * 0.8, lam(0x2a1a12), cx, 0.5, cz); }
     else if (p.kind === 'van') { box(w, 0.6, d, cutMat(p.c), cx, 0.4, cz); box(w * 0.3, 0.24, d + 0.02, bas(0x9fc4d8), cx + w * 0.3, 0.52, cz); box(w * 0.5, 0.1, d + 0.03, bas(0xf3b43f), cx - w * 0.15, 0.36, cz); }
+    else if (p.kind === 'car') { // a parked car: one of the game's own cars, switched off
+      const pc = makeCar('chor', { paint: p.c }); pc.g.position.set(cx, 0, cz); pc.g.rotation.y = (w >= d ? Math.PI / 2 : 0) + (p.flip ? Math.PI : 0); scene.add(pc.g);
+      pc.update({ speed: 0, steer: 0, brake: false, lights: false, siren: false, nitro: false, hidden: false, alpha: 1 }, 0.016, 0);
+    }
     else if (p.kind === 'crate') { box(w, p.h || 0.55, d, cutMat(p.c), cx, (p.h || 0.55) / 2, cz); }
     else { box(w, 0.7, d, cutMat(p.c), cx, 0.45, cz); box(w * 0.9, 0.16, d + 0.02, bas(0xffe9a8), cx, 0.55, cz); }
   }
@@ -434,6 +666,7 @@ export function buildScene(scene, map, W, U, quality) {
   bulb.instanceColor.needsUpdate = true; cones.instanceColor.needsUpdate = true;
   poles.frustumCulled = arms.frustumCulled = bulb.frustumCulled = cones.frustumCulled = false; cones.renderOrder = 3;
   scene.add(poles); scene.add(arms); scene.add(bulb); if (quality.cones) scene.add(cones);
+  H.cones = cones;
 
   // police posts
   for (const p of W.posts) {

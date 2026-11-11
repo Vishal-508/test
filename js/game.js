@@ -1,7 +1,7 @@
 // Chor Police: Jugnupur ki Raat. A night car chase: game rules, police AI, multiplayer sync, input, camera, HUD and the main loop.
 import * as THREE from '../vendor/three.module.min.js';
 import { CFG, matchSetup, rankFor, paintsUnlocked } from './config.js?v=4';
-import { buildWorld, hash2, LANE } from './world.js?v=4';
+import { buildWorld, hash2, LANE, N as GRID, CS } from './world.js?v=4';
 import { buildScene, paintMini, setSiteVisual, COLORS, LABELS, makeLabel } from './scene.js?v=4';
 import { makeVehicle, stepVehicle, makeDriver, drive, CAR } from './vehicle.js?v=4';
 import { makeCar, PAINTS } from './cars.js?v=4';
@@ -28,7 +28,7 @@ const HIDE = CFG.HIDE, BUST = CFG.BUST;
 // ------------------------------------------------------------------ saved progress
 const SAVE_KEY = 'jugnupur.save.v2';
 const save = (() => {
-  const d = { name: '', night: 1, total: 0, wins: 0, muted: false, music: true, paint: '', quality: 'auto', medals: {} };
+  const d = { name: '', night: 1, total: 0, wins: 0, muted: false, music: true, paint: '', quality: 'auto', cam: 'auto', medals: {} };
   try { const old = JSON.parse(localStorage.getItem('jugnupur.save.v1') || '{}'); if (old.name) d.name = old.name; } catch (e) { /* no older save */ }
   try { return Object.assign(d, JSON.parse(localStorage.getItem(SAVE_KEY) || '{}')); } catch (e) { return d; }
 })();
@@ -47,7 +47,7 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, pixelCap));
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(COLORS.fog);
 scene.fog = new THREE.Fog(COLORS.fog, 16, 52);
-const camera = new THREE.PerspectiveCamera(52, 1, 1.6, 180);
+const camera = new THREE.PerspectiveCamera(52, 1, 1.6, 420);
 const HEMI = 1.55, MOON = 1.05;
 const hemi = new THREE.HemisphereLight(0x8d93ab, 0x4c4850, HEMI); scene.add(hemi);
 const moon = new THREE.DirectionalLight(0xc6ceff, MOON); moon.position.set(-30, 40, 45); scene.add(moon);
@@ -69,7 +69,7 @@ const S = {
   lobby: { code: '', players: [] }, night: 1,
   players: new Map(), cops: [], sites: [], me: null, others: [],
   t: 0, banked: 0, target: 800, over: null, leverLock: 0, cfg: null, flags: {}, evOut: [], pings: [], searchLv: {}, searchFound: {}, openDoors: [],
-  cam: { yaw: 0, dist: 7.6, pitch: 0.7, orbit: 0, look: 0, lookT: 0, fov: 52, hide: 0, shake: 0, lastHide: null, pos: new THREE.Vector3(50, 19, 80), tgt: new THREE.Vector3(50, 0, 50) },
+  cam: { yaw: 0, dist: 7.6, pitch: 0.7, pull: 1, ahead: 0.7, ty: 0.3, orbit: 0, look: 0, lookT: 0, fov: 52, hide: 0, shake: 0, lastHide: null, pos: new THREE.Vector3(50, 19, 80), tgt: new THREE.Vector3(50, 0, 50) },
   hold: { key: '', t: 0 }, latch: false, ctx: null, danger: 0, lastSnap: 0, lastSend: 0, lightningAt: 0, lowFps: 0, exitMode: 0, stuckT: 0, resetT: 0, missT: 0,
 };
 const In = { keys: new Set(), mx: 0, my: 0, actTouch: false, nitroTouch: false, brakeTouch: false, stick: null, look: null, brakeHeld: false, revOk: false, restT: 0 };
@@ -825,9 +825,20 @@ function updateLights(dt, time) {
   hemi.intensity = HEMI + fx.flash * 3.2; moon.intensity = MOON + fx.flash * 2.6;
   if (post.enabled) post.uniforms.uFlash.value = fx.flash * 0.16;
 }
+// Two ways to follow the car: 'high' looks down over the rooftops, 'street' sits low behind the boot.
+const CAMS = {
+  high: { dist: 7.6, pitch: 0.7, fov: 52, ahead: 0.7, aheadV: 0.42, grow: 0.42, near: 1.6, ty: 0.3, collide: false },
+  street: { dist: 2.9, pitch: 0.29, fov: 60, ahead: 0.6, aheadV: 0.12, grow: 0.13, near: 0.15, ty: 0.5, collide: true },
+};
+const camMode = () => (save.cam === 'street' || save.cam === 'high') ? save.cam : ((W && W.layout.camera) || 'high');
+function camPreset() {
+  const m = camMode(), C = CAMS[m], o = W && W.layout.cams && W.layout.cams[m];
+  return o ? Object.assign({}, C, o) : C;
+}
+function toggleCam() { save.cam = camMode() === 'street' ? 'high' : 'street'; storeSave(); refreshMenu(); toast(save.cam === 'street' ? 'Street view' : 'High view'); }
 function updateCamera(dt, time) {
-  const cam = S.cam, me = S.me;
-  let wantNear = 1.6;
+  const cam = S.cam, me = S.me, C = camPreset();
+  let wantNear = C.near;
   if ((S.screen === 'play' || S.screen === 'over') && me) {
     const v = me.v, sp = Math.abs(v.vf);
     // behind a hideout door the camera moves inside, low, looking out through the gaps
@@ -836,9 +847,23 @@ function updateCamera(dt, time) {
     if (inside) cam.lastHide = h;
     if (!In.look) { cam.lookT -= dt; if (cam.lookT <= 0) cam.look *= Math.max(0, 1 - dt * 3); }
     cam.yaw = lerpAngle(cam.yaw, Math.PI - v.a, Math.min(1, dt * (me.scr ? 1.2 : v.vf < -0.3 ? 0.6 : 2.6 + sp * 0.5)));
-    const yaw = cam.yaw + (inside ? 0 : cam.look), fx_ = Math.sin(yaw), fz = -Math.cos(yaw), D = cam.dist + sp * 0.42, cp = Math.cos(cam.pitch), spn = Math.sin(cam.pitch);
-    const ahead = 0.7 + Math.max(0, v.vf) * 0.42, tx = v.x + Math.sin(v.a) * ahead, tz = v.y + Math.cos(v.a) * ahead;
-    v3.set(tx - fx_ * D * cp, D * spn, tz - fz * D * cp); v3b.set(tx, 0.3, tz);
+    const ease = Math.min(1, dt * 3);   // switching view glides from one to the other
+    cam.dist += (C.dist - cam.dist) * ease; cam.pitch += (C.pitch - cam.pitch) * ease; cam.ahead += (C.ahead - cam.ahead) * ease; cam.ty += (C.ty - cam.ty) * ease;
+    const yaw = cam.yaw + (inside ? 0 : cam.look), fx_ = Math.sin(yaw), fz = -Math.cos(yaw), D = cam.dist + sp * C.grow, cp = Math.cos(cam.pitch), spn = Math.sin(cam.pitch);
+    const ahead = cam.ahead + Math.max(0, v.vf) * C.aheadV, tx = v.x + Math.sin(v.a) * ahead, tz = v.y + Math.cos(v.a) * ahead;
+    v3.set(tx - fx_ * D * cp, D * spn, tz - fz * D * cp); v3b.set(tx, cam.ty, tz);
+    if (C.collide && !inside) {
+      // never sit inside a building: walk from the car toward the camera and stop short of anything taller than the line of sight
+      const sx = v.x, sz = v.y, sy = 0.6, ex = v3.x, ey = v3.y, ez = v3.z, n = Math.max(1, Math.ceil(Math.hypot(ex - sx, ez - sz) / 0.18));
+      let f = 1;
+      for (let k = 1; k <= n; k++) {
+        const t = k / n, x = sx + (ex - sx) * t, z = sz + (ez - sz) * t, y = sy + (ey - sy) * t;
+        if (x < 0 || z < 0 || x >= 100 || z >= 100) continue;
+        if (W.hgt[Math.floor(z / CS) * GRID + Math.floor(x / CS)] > y - 0.15) { f = Math.max(0.2, (k - 1.6) / n); break; }
+      }
+      cam.pull += (f - cam.pull) * Math.min(1, dt * (f < cam.pull ? 16 : 2.2));
+      if (cam.pull < 0.995) { const q = cam.pull; v3.set(sx + (ex - sx) * q, Math.max(0.55, sy + (ey - sy) * q + (1 - q) * 0.4), sz + (ez - sz) * q); }
+    } else cam.pull = 1;
     if (cam.hide > 0.002 && cam.lastHide) {
       const hh = cam.lastHide, ox = Math.sin(hh.a), oz = Math.cos(hh.a), e = smooth(cam.hide), back = hh.grove ? 0.7 : 0.8, pan = clamp(cam.look, -0.7, 0.7);
       v3.lerp(v3c.set(hh.x - ox * back, hh.grove ? 0.62 : 0.47, hh.y - oz * back), e);
@@ -848,7 +873,7 @@ function updateCamera(dt, time) {
     if (cam.shake > 0.001) { cam.shake *= Math.max(0, 1 - dt * 6); v3.x += (Math.random() - 0.5) * cam.shake; v3.y += (Math.random() - 0.5) * cam.shake * 0.6; v3.z += (Math.random() - 0.5) * cam.shake; }
     cam.pos.lerp(v3, Math.min(1, dt * 9)); cam.tgt.lerp(v3b, Math.min(1, dt * 11));
     camera.position.copy(cam.pos); camera.lookAt(cam.tgt);
-    cam.fov += ((innerWidth < innerHeight ? 60 : 52) + (me.nitroOn ? 9 : 0) + sp * 1.2 - cam.fov) * Math.min(1, dt * 4);
+    cam.fov += ((innerWidth < innerHeight ? C.fov + 8 : C.fov) + (me.nitroOn ? 9 : 0) + sp * 1.2 - cam.fov) * Math.min(1, dt * 4);
     camera.updateMatrixWorld();
     if (cam.hide > 0.5) U.uCut.value.z = -1;
     else { v3.set(v.x, 0.25, v.y).project(camera); U.uCut.value.x = v3.x * 0.5 + 0.5; U.uCut.value.y = v3.y * 0.5 + 0.5; v3.set(v.x, 0.25, v.y).applyMatrix4(camera.matrixWorldInverse); U.uCut.value.z = -v3.z; }
@@ -860,10 +885,15 @@ function updateCamera(dt, time) {
   if (Math.abs(camera.fov - cam.fov) > 0.05 || camera.near !== wantNear) { camera.fov = cam.fov; camera.near = wantNear; camera.updateProjectionMatrix(); }
 }
 function updateLabels() {
+  const street = camMode() === 'street' && (S.screen === 'play' || S.screen === 'over');
+  if (H.cones) H.cones.visible = !street;
+  if (hudCache.street !== street) { hudCache.street = street; document.body.classList.toggle('streetcam', street); }   // from below, the lamps' cones of light would fill the screen
   for (const sp of LABELS) {
     if (!sp.visible) continue;
     sp.getWorldPosition(v3); const d = v3.distanceTo(camera.position), s = sp.userData.base * clamp(d / 9.5, 0.55, 2.2);
-    sp.scale.set(s * sp.userData.ratio, s, 1); sp.material.opacity = clamp((d - 2.6) / 2.5, 0, 1) * (S.cam.hide > 0.5 ? 0 : 1);
+    // from street level only the name tags of places nearby show, or the whole town's would pile up along the horizon
+    const reach = street ? (sp.userData.far ? 30 : 13) : 1e9;
+    sp.scale.set(s * sp.userData.ratio, s, 1); sp.material.opacity = clamp((d - 2.6) / 2.5, 0, 1) * clamp((reach - d) / 4, 0, 1) * (S.cam.hide > 0.5 ? 0 : 1);
   }
 }
 function updateWorldVisuals(time) {
@@ -889,7 +919,8 @@ function updateWorldVisuals(time) {
   if (tgt && dist(me.v, tgt) > 3) {
     const a = Math.atan2(tgt.x - me.v.x, tgt.y - me.v.y);
     arrow.visible = true; arrow.material.color.setHex(col);
-    arrow.position.set(me.v.x + Math.sin(a) * 1.15, 0.07, me.v.y + Math.cos(a) * 1.15); arrow.rotation.y = a;
+    const near = camMode() === 'street' ? 0.6 : 1;   // smaller and closer in the street view, where it sits right in front of the camera
+    arrow.position.set(me.v.x + Math.sin(a) * 1.15 * (near < 1 ? 0.85 : 1), 0.07, me.v.y + Math.cos(a) * 1.15 * (near < 1 ? 0.85 : 1)); arrow.rotation.y = a; arrow.scale.setScalar(near);
   } else arrow.visible = false;
 }
 let hudCache = {};
@@ -1060,6 +1091,7 @@ function refreshMenu() {
   $('btnMute').textContent = isMuted() ? 'Sound off' : 'Sound on';
   const q = 'Graphics: ' + (save.quality === 'auto' ? 'Auto' : save.quality === 'high' ? 'High' : 'Low'); $('btnQuality').textContent = q; $('btnQuality2').textContent = q;
   const mu = 'Music: ' + (isMusicOn() ? 'on' : 'off'); $('btnMusic').textContent = mu; $('btnMusic2').textContent = mu;
+  $('btnCam').textContent = 'View: ' + (camMode() === 'street' ? 'Street' : 'High');
   const box = $('paints'), open = paintsUnlocked(save.total); box.innerHTML = '';
   PAINTS.forEach((p, k) => {
     const b = document.createElement('button'); b.type = 'button'; b.style.background = '#' + p.hex.toString(16).padStart(6, '0'); b.title = p.name + (k >= open ? ' (bank more loot to unlock)' : ''); b.setAttribute('aria-label', p.name);
@@ -1224,6 +1256,7 @@ function bindUi() {
   $('btnQuality').onclick = cycleQ; $('btnQuality2').onclick = cycleQ;
   const togMusic = () => { initAudio(); setMusicOn(!isMusicOn()); save.music = isMusicOn(); storeSave(); refreshMenu(); };
   $('btnMusic').onclick = togMusic; $('btnMusic2').onclick = togMusic;
+  $('btnCam').onclick = () => { toggleCam(); sfx.click(); };
   $('btnLights').onclick = () => toggleLights();
   $('btnSlip').onclick = () => leaveHide(0); $('btnBurst').onclick = () => leaveHide(1);
   if (!isTouch) { $('btnSlip').textContent = 'Slip out quietly · E'; $('btnBurst').textContent = 'Burst out · W'; }
@@ -1240,6 +1273,7 @@ function bindUi() {
     if (e.code === 'KeyM') { $('mini').classList.toggle('big'); return; }
     if (e.code === 'KeyL' && !e.repeat) { toggleLights(); return; }
     if (e.code === 'KeyH' && !e.repeat) { sfx.horn(); return; }
+    if (e.code === 'KeyC' && !e.repeat) { toggleCam(); return; }
     if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
     In.keys.add(e.code);
   });
@@ -1350,7 +1384,10 @@ async function boot() {
   H = buildScene(scene, map, W, U, { ground: high ? 2048 : 1024, aniso: Math.min(8, renderer.capabilities.getMaxAnisotropy()), wet: high, cones: true });
   fx = new Fx(scene, { quality: high ? 'high' : 'low' });
   dressing = buildDressing(scene, W, { hash2, U, vocab: map.signs || null });
-  ambient = buildAmbient(scene, W, map, { hash2 });
+  for (const vz of H.siteVis) if (vz.label) vz.label.userData.far = true;   // loot name tags are worth seeing from further off
+  for (const vz of (H.escVis || [])) if (vz.label) vz.label.userData.far = true;
+  ambient = buildAmbient(scene, W, map, { hash2, camera, cutMat: H.cutMat });
+  if (W.layout.fog) { scene.fog.near = W.layout.fog[0]; scene.fog.far = W.layout.fog[1]; }
   miniBase = document.createElement('canvas'); miniBase.width = miniBase.height = 500; paintMini(miniBase, map, W);
   setMuted(!!save.muted); setMusicOn(save.music !== false);
   if (!PAINTS.some(p => p.id === save.paint)) save.paint = PAINTS[0].id;

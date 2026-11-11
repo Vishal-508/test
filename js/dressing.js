@@ -558,7 +558,7 @@ function planSigns(W, rnd) {
 // Picks the rooftop clutter for a world: which roofs, what, and exactly where. Plain records again.
 function planRoofs(W, rnd) {
   const boxes = Array.isArray(W && W.boxes) ? W.boxes : [];
-  const roofs = boxes.filter(b => b && b.style !== 'bagh' && b.style !== 'ghat' && b.h >= 0.5 && b.w >= 0.5 && b.d >= 0.5);
+  const roofs = boxes.filter(b => b && b.style !== 'bagh' && b.style !== 'ghat' && !b.gable && !b.noRoof && b.h >= 0.5 && b.w >= 0.5 && b.d >= 0.5);
   const ix = b => Math.round(b.x * 2), iz = b => Math.round(b.y * 2);
   const ranked = (salt, weights, minSide) => roofs.filter(b => (weights[b.style] === undefined ? 1 : weights[b.style]) > 0 && Math.min(b.w, b.d) >= minSide)
     .map((b, i) => ({ b, i, key: rnd(ix(b), iz(b), salt) / (weights[b.style] === undefined ? 1 : weights[b.style]) }))

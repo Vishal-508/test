@@ -85,6 +85,7 @@ kbd{font-family:ui-monospace,Menlo,monospace;font-size:.82em;background:#1b2540;
 .hb .bar{margin:0;height:7px} #hotBar{background:linear-gradient(90deg,#ffb04a,#ff4a2a)} #nearBar{background:var(--police)} #infBar{background:#c9a0ff} .hb .bar i{transition:none}
 #hideBtns{position:absolute;bottom:calc(9vh + 16px);left:50%;transform:translateX(-50%);display:flex;gap:10px;pointer-events:auto}
 #hideui:not(.on) #hideBtns{pointer-events:none}
+body.streetcam #prompt{bottom:44%}
 body.hiding #dash,body.hiding #touch,body.hiding #help,body.hiding #prompt,body.hiding #phase,body.hiding #bust{display:none!important}
 #hideBtns button{font-size:.95rem;white-space:nowrap}
 #status{font-size:.8rem;letter-spacing:.08em;min-width:74px;text-align:center} #status.hunted{color:#fff;background:#b3261e;border-color:#ff6a5a} #status.wanted{color:var(--loot)} #status.clear{color:var(--escape)} #status.hidden{color:var(--hide)}
@@ -179,7 +180,7 @@ body.touch #prompt{bottom:calc(214px + var(--sab))}
     <button id="btnAct">ACT</button>
   </div>
   <div id="corner"><button id="btnPause">Menu</button><button id="btnLights">Lights</button><button id="btnMute">Sound on</button></div>
-  <div id="help"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> drive · <kbd>Space</kbd> handbrake · <kbd>Shift</kbd> nitro · <kbd>E</kbd> hide · <kbd>L</kbd> lights · <kbd>M</kbd> map · hold <kbd>R</kbd> unstick</div>
+  <div id="help"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> drive · <kbd>Space</kbd> handbrake · <kbd>Shift</kbd> nitro · <kbd>E</kbd> hide · <kbd>L</kbd> lights · <kbd>C</kbd> view · <kbd>M</kbd> map · hold <kbd>R</kbd> unstick</div>
 </div>
 
 <div id="menu" class="screen" hidden>
@@ -249,6 +250,7 @@ body.touch #prompt{bottom:calc(214px + var(--sab))}
     <h2>Paused</h2>
     <p class="small" id="pauseNote">The round keeps running while this menu is open.</p>
     <div class="row opts"><button id="btnQuality2" class="ghost">Graphics: Auto</button><button id="btnMusic2" class="ghost">Music: on</button></div>
+    <div class="row opts"><button id="btnCam" class="ghost">View: High</button></div>
     <div class="row"><button id="btnResume" class="primary">Back to the game</button><button id="btnQuit">Leave round</button></div>
   </div>
 </div>

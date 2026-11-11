@@ -255,7 +255,11 @@ export function buildWorld(map) {
 
   // --- merge building cells into boxes
   const used = new Uint8Array(N * N), boxes = [];
-  const styleAt = (x, y) => { const d = districtAt(x, y); return d === 'basti' ? (y < 60 ? 'mill' : 'huts') : d; };
+  const strips = L.strips || [];   // rectangles that override the district's building style (shops under a railway viaduct, say)
+  const styleAt = (x, y) => {
+    for (const q of strips) if (x >= q.x0 && x < q.x1 && y >= q.y0 && y < q.y1) return q.style;
+    const d = districtAt(x, y); return d === 'basti' ? (y < 60 ? 'mill' : 'huts') : d;
+  };
   for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
     if (type[idx(i, j)] !== T.BLDG || used[idx(i, j)]) continue;
     const sk = styleAt((i + 0.5) * CS, (j + 0.5) * CS), st = STYLES[sk] || STYLE.kotwali;
@@ -268,7 +272,11 @@ export function buildWorld(map) {
       d++;
     }
     for (let b = 0; b < d; b++) for (let a = 0; a < w; a++) used[idx(i + a, j + b)] = 1;
-    boxes.push({ x: i * CS, y: j * CS, w: w * CS, d: d * CS, h: st.h0 + hash2(i + 7, j + 3) * st.h1, c: st.pal[Math.floor(hash2(i + 13, j + 29) * st.pal.length)], win: st.win, style: sk });
+    // fs: which kind of front the building has (0 = the plain town look; others are listed in js/scene.js)
+    const fs = st.fac ? st.fac[Math.floor(hash2(i + 31, j + 17) * st.fac.length)] : 0;
+    let bh = st.h0 + hash2(i + 7, j + 3) * st.h1;
+    if (fs === 4) bh = 0.62 + hash2(i + 7, j + 3) * 0.55;   // old wooden houses: one or two storeys under a tiled roof
+    boxes.push({ x: i * CS, y: j * CS, w: w * CS, d: d * CS, h: bh, c: st.pal[Math.floor(hash2(i + 13, j + 29) * st.pal.length)], win: st.win, style: sk, fs, gable: fs === 4 && Math.min(w, d) >= 2 });
   }
 
   // --- building faces that look onto a street or main road: where shop signs and shutters can hang
@@ -283,7 +291,7 @@ export function buildWorld(map) {
         if (on && run < 0) { run = q; kind = lk; }
         if (!on && run >= 0) {
           const len = (q - run) * CS, mid = (run + q) / 2 * CS;
-          if (len >= 1.5) facades.push({ x: fx(mid), y: fy(mid), nx, ny, len, h: b.h, kind: kind === LANE.MAIN ? 'main' : 'street', district: districtAt(fx(mid), fy(mid)) });
+          if (len >= 1.5) facades.push({ x: fx(mid), y: fy(mid), nx, ny, len, h: b.h, fs: b.fs, kind: kind === LANE.MAIN ? 'main' : 'street', district: districtAt(fx(mid), fy(mid)) });
           run = -1;
         }
       }
@@ -293,6 +301,14 @@ export function buildWorld(map) {
     if (i0 > 0) side(d, q => idx(i0 - 1, j0 + q), () => b.x, m => b.y + m, -1, 0);
     if (i0 + w < N) side(d, q => idx(i0 + w, j0 + q), () => b.x + b.w, m => b.y + m, 1, 0);
   }
+
+  // --- how tall the thing standing on each cell is (for the chase camera, which must not sit inside a building)
+  const hgt = new Float32Array(N * N);
+  for (const b of boxes) {
+    const top = b.h + (b.gable ? Math.min(0.7, 0.42 * Math.min(b.w, b.d)) * 0.6 : 0);
+    for (let j = Math.round(b.y / CS); j < Math.round((b.y + b.d) / CS); j++) for (let i = Math.round(b.x / CS); i < Math.round((b.x + b.w) / CS); i++) hgt[idx(i, j)] = top;
+  }
+  for (let k = 0; k < N * N; k++) { if (type[k] === T.MARK) hgt[k] = 2.4; else if (type[k] === T.BAY) hgt[k] = 0.95; }
 
   // --- street lamps
   const lamps = [];
@@ -478,7 +494,7 @@ export function buildWorld(map) {
   for (const s of spawns) { const q = safeSpot(s.x + Math.sin(s.a) * 1.5, s.y + Math.cos(s.a) * 1.5, false); s.x = q.x; s.y = q.y; s.a = q.a; }
 
   return {
-    type, ai, lane, boxes, facades, lamps, trees, lines, marks, solidProps, cage, galis,
+    type, ai, lane, hgt, boxes, facades, lamps, trees, lines, marks, solidProps, cage, galis,
     sites, hides, escapes, levers, posts, spawns,
     policeSpawns: L.policeSpawns, cageSlots: L.cageSlots, releasePoints: L.releasePoints, layout: L, park,
     districtAt, inPark, walkable, policeOk, solidChor, solidPolice, laneAt, los, findPath, nearestWalk, safeSpot,
