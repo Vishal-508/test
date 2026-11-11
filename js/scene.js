@@ -17,23 +17,36 @@ function drawLanes(l, S, map, W, clipMask) {
   l.lineCap = 'round'; l.lineJoin = 'round';
   const path = pts => { l.beginPath(); pts.forEach((p, k) => k ? l.lineTo(p.x * S, p.y * S) : l.moveTo(p.x * S, p.y * S)); };
   const stroke = (pts, w, col, dash) => { path(pts); l.lineWidth = w * S; l.strokeStyle = col; l.setLineDash(dash ? dash.map(d => d * S) : []); l.stroke(); l.setLineDash([]); };
+  const LY = W.layout, pk = W.park;
   // park grass with darker and lighter patches
-  l.fillStyle = '#132a1c'; l.fillRect(24 * S, 52 * S, 24 * S, 24 * S);
-  for (let k = 0; k < 280; k++) {
-    const x = 24.5 + hash2(k, 3) * 23, y = 52.5 + hash2(k, 9) * 23, r = 0.4 + hash2(k, 17) * 1.3;
-    l.fillStyle = hash2(k, 23) > 0.5 ? 'rgba(34,78,46,0.35)' : 'rgba(6,18,10,0.4)'; l.beginPath(); l.arc(x * S, y * S, r * S, 0, 7); l.fill();
+  if (pk) {
+    const pw = pk.x1 - pk.x0, ph = pk.y1 - pk.y0;
+    l.fillStyle = '#132a1c'; l.fillRect((pk.x0 - 0.5) * S, (pk.y0 - 0.5) * S, (pw + 1) * S, (ph + 1) * S);
+    for (let k = 0; k < Math.round(pw * ph * 0.53); k++) {
+      const x = pk.x0 + hash2(k, 3) * pw, y = pk.y0 + hash2(k, 9) * ph, r = 0.4 + hash2(k, 17) * 1.3;
+      l.fillStyle = hash2(k, 23) > 0.5 ? 'rgba(34,78,46,0.35)' : 'rgba(6,18,10,0.4)'; l.beginPath(); l.arc(x * S, y * S, r * S, 0, 7); l.fill();
+    }
   }
-  // thana yard paving and bus-stand bays
-  l.fillStyle = '#30364a'; l.fillRect(53 * S, 37 * S, 10 * S, 10 * S);
-  l.strokeStyle = 'rgba(255,255,255,0.05)'; l.lineWidth = 1;
-  for (let v = 53.5; v < 63; v += 1) { l.beginPath(); l.moveTo(v * S, 37 * S); l.lineTo(v * S, 47 * S); l.stroke(); l.beginPath(); l.moveTo(53 * S, (v - 16) * S); l.lineTo(63 * S, (v - 16) * S); l.stroke(); }
-  l.fillStyle = '#272a33'; l.fillRect(88 * S, 44 * S, 10 * S, 18 * S);
-  l.strokeStyle = 'rgba(240,220,140,0.2)'; l.lineWidth = 0.08 * S;
-  for (let v = 45.5; v < 62; v += 1.6) { l.beginPath(); l.moveTo(88.6 * S, v * S); l.lineTo(90.2 * S, v * S); l.stroke(); l.beginPath(); l.moveTo(95.8 * S, v * S); l.lineTo(97.4 * S, v * S); l.stroke(); }
-  const alleyCol = { kotwali: '#282f42', sarafa: '#2f2b2b', patri: '#2c2a24', afsar: '#252d40', basti: '#322922', ghat: '#263333', bagh: '#2e312c' };
+  // police yard paving and parking-lot bays
+  for (const o of (LY.open || [])) {
+    const x0 = o.x0 - 0.5, y0 = o.y0 - 0.5, x1 = o.x1 + 0.5, y1 = o.y1 + 0.5;
+    if (o.paint === 'yard') {
+      l.fillStyle = '#30364a'; l.fillRect(x0 * S, y0 * S, (x1 - x0) * S, (y1 - y0) * S);
+      l.strokeStyle = 'rgba(255,255,255,0.05)'; l.lineWidth = 1;
+      for (let v = x0 + 0.5; v < x1; v += 1) { l.beginPath(); l.moveTo(v * S, y0 * S); l.lineTo(v * S, y1 * S); l.stroke(); }
+      for (let v = y0 + 0.5; v < y1; v += 1) { l.beginPath(); l.moveTo(x0 * S, v * S); l.lineTo(x1 * S, v * S); l.stroke(); }
+    } else if (o.paint === 'lot') {
+      l.fillStyle = '#272a33'; l.fillRect(x0 * S, y0 * S, (x1 - x0) * S, (y1 - y0) * S);
+      l.strokeStyle = 'rgba(240,220,140,0.2)'; l.lineWidth = 0.08 * S;
+      for (let v = y0 + 1.5; v < y1; v += 1.6) { l.beginPath(); l.moveTo((x0 + 0.6) * S, v * S); l.lineTo((x0 + 2.2) * S, v * S); l.stroke(); l.beginPath(); l.moveTo((x1 - 2.2) * S, v * S); l.lineTo((x1 - 0.6) * S, v * S); l.stroke(); }
+    } else if (o.paint === 'plaza') {
+      l.fillStyle = o.color || '#2b2f3d'; l.fillRect(x0 * S, y0 * S, (x1 - x0) * S, (y1 - y0) * S);
+    }
+  }
+  const alleyCol = Object.assign({ kotwali: '#282f42', sarafa: '#2f2b2b', patri: '#2c2a24', afsar: '#252d40', basti: '#322922', ghat: '#263333', bagh: '#2e312c' }, LY.alley || {});
   const kinds = k => map.roads.filter(r => r.kind === k);
   for (const r of kinds('drain')) { const p = r.points.map(q => ({ x: q.x, y: Math.min(q.y, 93.2) })); stroke(p, 2.5, '#454e64'); stroke(p, 2.1, '#0b0e17'); stroke(p, 0.3, 'rgba(70,110,150,0.3)', [0.9, 1.7]); }
-  for (const r of kinds('alley')) stroke(r.points, 1.64, alleyCol[W.districtAt(r.points[0].x, r.points[0].y)]);
+  for (const r of kinds('alley')) stroke(r.points, 1.64, alleyCol[W.districtAt(r.points[0].x, r.points[0].y)] || '#282f42');
   for (const r of map.special_routes) if (r.name === 'Tirpal Surang') stroke(r.points, 1.64, '#2a2626');
   for (const g of W.galis) { stroke(g.points, 1.54, '#2a2228'); }
   for (const r of kinds('street')) stroke(r.points, 2.04, r.name === 'Bagh ki Pagdandi' ? '#3d3c35' : '#2e3447');
@@ -41,6 +54,13 @@ function drawLanes(l, S, map, W, clipMask) {
   for (const r of kinds('main')) stroke(r.points, 3.06, '#3a4259');
   for (const r of kinds('main')) { stroke(r.points, 2.76, '#30374b'); stroke(r.points, 0.1, '#9aa1b8', [1.0, 1.4]); }
   for (const r of kinds('bridge')) stroke(r.points, 3.06, '#40485f');
+  // zebra crossings
+  l.fillStyle = 'rgba(214,220,235,0.5)';
+  for (const z of (LY.crossings || [])) {
+    const w = z.x1 - z.x0, h = z.y1 - z.y0;
+    if (w >= h) for (let x = z.x0 + 0.15; x < z.x1 - 0.2; x += 0.55) l.fillRect(x * S, z.y0 * S, 0.28 * S, h * S);
+    else for (let y = z.y0 + 0.15; y < z.y1 - 0.2; y += 0.55) l.fillRect(z.x0 * S, y * S, w * S, 0.28 * S);
+  }
   if (clipMask) { l.globalCompositeOperation = 'destination-in'; l.drawImage(clipMask, 0, 0); l.globalCompositeOperation = 'source-over'; }
 }
 
@@ -50,11 +70,11 @@ export function paintGround(size, map, W) {
   // ---- colour
   const alb = mk(), c = alb.getContext('2d');
   c.fillStyle = '#070a12'; c.fillRect(0, 0, size, size);
-  const base = { kotwali: '#262d3f', sarafa: '#2c292a', patri: '#2a2822', afsar: '#232b3d', basti: '#2d251f', ghat: '#222e2e', bagh: '#152a1c' };
+  const base = Object.assign({ kotwali: '#262d3f', sarafa: '#2c292a', patri: '#2a2822', afsar: '#232b3d', basti: '#2d251f', ghat: '#222e2e', bagh: '#152a1c' }, W.layout.ground || {});
   const mask = mk(), m = mask.getContext('2d'); m.fillStyle = '#fff';
   for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
     const t = W.type[j * N + i], x = (i + 0.5) * CS, y = (j + 0.5) * CS;
-    if (t === T.WALK || t === T.CAGE || t === T.BAY || (t === T.PROP && W.inPark(x, y))) { c.fillStyle = base[W.districtAt(x, y)]; c.fillRect(i * px, j * px, px + 0.6, px + 0.6); m.fillRect(i * px, j * px, px + 0.6, px + 0.6); }
+    if (t === T.WALK || t === T.CAGE || t === T.BAY || (t === T.PROP && W.inPark(x, y))) { c.fillStyle = base[W.districtAt(x, y)] || '#262d3f'; c.fillRect(i * px, j * px, px + 0.6, px + 0.6); m.fillRect(i * px, j * px, px + 0.6, px + 0.6); }
     else if (t === T.WATER) { c.fillStyle = '#0b2644'; c.fillRect(i * px, j * px, px + 0.6, px + 0.6); }
     else if (t === T.RAIL) { c.fillStyle = '#17181d'; c.fillRect(i * px, j * px, px + 0.6, px + 0.6); }
   }
@@ -62,12 +82,17 @@ export function paintGround(size, map, W) {
   // hideout bay floors: oil-stained concrete
   for (const h of W.hides) if (h.bay && !h.grove) { c.fillStyle = '#1d2029'; c.fillRect(h.bay.x0 * S, h.bay.y0 * S, (h.bay.x1 - h.bay.x0) * S, (h.bay.y1 - h.bay.y0) * S); c.fillStyle = 'rgba(0,0,0,0.35)'; c.beginPath(); c.ellipse(h.x * S, h.y * S, 0.35 * S, 0.5 * S, 0, 0, 7); c.fill(); }
   // rails and river detail
-  c.strokeStyle = '#2a2420'; c.lineWidth = 0.12 * S;
-  for (let x = 0; x < 100; x += 0.55) { c.beginPath(); c.moveTo(x * S, 3.6 * S); c.lineTo(x * S, 4.4 * S); c.stroke(); }
-  c.strokeStyle = '#7b8196'; c.lineWidth = 0.06 * S;
-  for (const y of [3.82, 4.18]) { c.beginPath(); c.moveTo(0, y * S); c.lineTo(100 * S, y * S); c.stroke(); }
-  c.strokeStyle = 'rgba(120,170,220,0.16)'; c.lineWidth = 0.06 * S;
-  for (let k = 0; k < 150; k++) { const x = hash2(k, 51) * 100, y = 94.9 + hash2(k, 57) * 4.9, w = 0.6 + hash2(k, 61) * 1.8; c.beginPath(); c.moveTo(x * S, y * S); c.lineTo((x + w) * S, y * S); c.stroke(); }
+  const railY = W.layout.railY, waterY = W.layout.waterY;
+  if (railY != null) {
+    c.strokeStyle = '#2a2420'; c.lineWidth = 0.12 * S;
+    for (let x = 0; x < 100; x += 0.55) { c.beginPath(); c.moveTo(x * S, (railY - 1.1) * S); c.lineTo(x * S, (railY - 0.3) * S); c.stroke(); }
+    c.strokeStyle = '#7b8196'; c.lineWidth = 0.06 * S;
+    for (const y of [railY - 0.88, railY - 0.52]) { c.beginPath(); c.moveTo(0, y * S); c.lineTo(100 * S, y * S); c.stroke(); }
+  }
+  if (waterY != null) {
+    c.strokeStyle = 'rgba(120,170,220,0.16)'; c.lineWidth = 0.06 * S;
+    for (let k = 0; k < 150; k++) { const x = hash2(k, 51) * 100, y = waterY + 0.3 + hash2(k, 57) * (99.8 - waterY - 0.3), w = 0.6 + hash2(k, 61) * 1.8; c.beginPath(); c.moveTo(x * S, y * S); c.lineTo((x + w) * S, y * S); c.stroke(); }
+  }
   c.fillStyle = '#1b2134'; c.fillRect(W.cage.x0 * S, W.cage.y0 * S, (W.cage.x1 - W.cage.x0) * S, (W.cage.y1 - W.cage.y0) * S);
   // soft dark edges where the road meets a wall (cheap ambient occlusion); skipped where canvas blur is missing
   if ('filter' in c) {
@@ -100,7 +125,7 @@ export function paintGround(size, map, W) {
   for (const s of W.sites) glow(s.x, s.y, 2.0, 0xf3b43f, 0.16);
   for (const x of W.escapes) glow(x.x, x.y, 2.6, 0x3bc98b, 0.16);
   for (const p of W.posts) glow(p.x, p.y, 2.6, 0x6a98ff, 0.22);
-  glow(58, 42, 5.5, 0xcfd8ff, 0.16); glow(50, 50, 4.5, 0xfff0b0, 0.22); glow(42, 51, 3.2, 0xff5fa0, 0.24); glow(50, 7, 4, 0xffe2a0, 0.2);
+  for (const q of (W.layout.glows || [])) glow(q[0], q[1], q[2], q[3], q[4]);
   e.globalCompositeOperation = 'destination-in'; e.drawImage(mask, 0, 0); e.globalCompositeOperation = 'source-over';   // light only falls on open ground
   // ---- wetness (roughness): mostly damp, with puddles on the roads
   const rsz = Math.min(1024, size), rs = rsz / 100, rgh = mk(rsz), r = rgh.getContext('2d');
@@ -117,7 +142,7 @@ export function paintGround(size, map, W) {
 export function paintMini(cv, map, W) {
   const S = cv.width / 100, c = cv.getContext('2d'), px = CS * S;
   c.fillStyle = '#0a0f1c'; c.fillRect(0, 0, cv.width, cv.height);
-  c.fillStyle = '#13281b'; c.fillRect(24 * S, 52 * S, 24 * S, 24 * S);
+  if (W.park) { c.fillStyle = '#13281b'; c.fillRect((W.park.x0 - 0.5) * S, (W.park.y0 - 0.5) * S, (W.park.x1 - W.park.x0 + 1) * S, (W.park.y1 - W.park.y0 + 1) * S); }
   for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
     const k = j * N + i, t = W.type[k];
     if (t === T.WALK) c.fillStyle = W.inPark((i + 0.5) * CS, (j + 0.5) * CS) ? '#1f4a30' : (W.ai[k] ? '#414c6b' : '#8a4a6e');
@@ -268,12 +293,12 @@ export function buildScene(scene, map, W, U, quality) {
       }
     }
   };
-  const M = W.marks;
-  // thana and its impound yard
-  cellBoxes(M.thana, () => 1.5, cutMat(0x8d7d55));
-  box(3.1, 0.18, 5.6, bas(0x3d6ae0), 61, 1.2, 40.75);
-  const thanaLamp = new THREE.Mesh(new THREE.SphereGeometry(0.16, 10, 8), bas(0x8fb4ff)); thanaLamp.position.set(59.6, 1.75, 43.4); scene.add(thanaLamp);
-  const tl = makeLabel('KOTWALI THANA', { color: '#9dbcff', h: 0.46 }); tl.position.set(58.5, 2.6, 42); scene.add(tl);
+  const M = W.marks, LY = W.layout, th = M.thana;
+  // police station and its impound yard
+  cellBoxes(th, () => 1.5, cutMat(LY.thanaColor || 0x8d7d55));
+  box(th.x1 - th.x0 + 0.1, 0.18, th.y1 - th.y0 + 0.1, bas(0x3d6ae0), (th.x0 + th.x1) / 2, 1.2, (th.y0 + th.y1) / 2);
+  const thanaLamp = new THREE.Mesh(new THREE.SphereGeometry(0.16, 10, 8), bas(0x8fb4ff)); thanaLamp.position.set(th.x0 + 0.1, 1.75, th.y1 - 0.1); scene.add(thanaLamp);
+  const tl = makeLabel(LY.thanaName || 'POLICE', { color: '#9dbcff', h: 0.46 }); tl.position.set((th.x0 + th.x1) / 2 - 2.5, 2.6, (th.y0 + th.y1) / 2 + 1.25); scene.add(tl);
   const barMat = bas(0xaab4c8);
   const cg = W.cage, bars = [];
   for (let x = cg.x0; x <= cg.x1 + 0.01; x += 0.35) { bars.push([x, cg.y0]); bars.push([x, cg.y1]); }
@@ -283,7 +308,8 @@ export function buildScene(scene, map, W, U, quality) {
   scene.add(barIM);
   box(cg.x1 - cg.x0 + 0.1, 0.06, 0.06, barMat, (cg.x0 + cg.x1) / 2, 0.7, cg.y0); box(cg.x1 - cg.x0 + 0.1, 0.06, 0.06, barMat, (cg.x0 + cg.x1) / 2, 0.7, cg.y1);
   box(0.06, 0.06, cg.y1 - cg.y0, barMat, cg.x0, 0.7, (cg.y0 + cg.y1) / 2); box(0.06, 0.06, cg.y1 - cg.y0, barMat, cg.x1, 0.7, (cg.y0 + cg.y1) / 2);
-  const jl = makeLabel('IMPOUND', { color: '#c9d4ee', h: 0.4 }); jl.position.set(55.2, 1.4, 38.5); scene.add(jl);
+  const jl = makeLabel('IMPOUND', { color: '#c9d4ee', h: 0.4 }); jl.position.set((cg.x0 + cg.x1) / 2, 1.4, (cg.y0 + cg.y1) / 2); scene.add(jl);
+  if (LY.id === 'jugnupur') {
   // clock tower
   const stone = cutMat(0x8a8272);
   box(1, 4.6, 1, stone, 50, 2.3, 50); box(1.25, 0.2, 1.25, stone, 50, 3.4, 50);
@@ -318,11 +344,63 @@ export function buildScene(scene, map, W, U, quality) {
   box(0.7, 2.5, 0.7, sand, 29, 1.25, 20.0); box(0.7, 2.5, 0.7, sand, 29, 1.25, 24.0); box(0.8, 0.55, 4.7, sand, 29, 2.7, 22);
   box(0.84, 0.12, 4.74, bas(0x49c46a), 29, 2.36, 22);
   const gl = makeLabel('Tota Darwaza', { color: '#b8f2c6', h: 0.45 }); gl.position.set(29, 3.6, 22); scene.add(gl);
+  } else {
+    // landmarks described in the map file
+    const hexCss = n => '#' + (n >>> 0).toString(16).padStart(6, '0');
+    const tag = (text, x, y, z, col, h) => { if (!text) return; const lb = makeLabel(text, { color: col || '#e8ecff', h: h || 0.44 }); lb.position.set(x, y, z); scene.add(lb); };
+    for (const q of (LY.landmarks || [])) {
+      if (q.type === 'block') {            // a solid building on a marked footprint, with an optional glowing band and name
+        const r = M[q.mark]; if (!r) continue;
+        const cx = (r.x0 + r.x1) / 2, cz = (r.y0 + r.y1) / 2, w = r.x1 - r.x0, d = r.y1 - r.y0;
+        cellBoxes(r, () => q.h, cutMat(q.color));
+        if (q.band != null) box(w + 0.08, q.bandH || 0.2, d + 0.08, bas(q.band), cx, q.bandY != null ? q.bandY : q.h * 0.72, cz);
+        if (q.roof != null) box(w + 0.5, 0.14, d + 0.5, cutMat(q.roof), cx, q.h + 0.07, cz);
+        tag(q.label, cx, q.h + 0.9, cz, q.labelColor, q.labelH);
+      } else if (q.type === 'tower') {     // a tall lattice broadcasting tower with lit decks and a beacon
+        const r = M[q.mark]; if (r) cellBoxes(r, () => 0.4, cutMat(0x54575f));
+        const h = q.h || 9, mat = cutMat(q.color || 0xd8452e), white = cutMat(0xe8e2d6);
+        const body = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.95, h, 4, 6, true), mat); body.material.side = THREE.DoubleSide; body.position.set(q.x, h / 2 + 0.3, q.y); body.rotation.y = Math.PI / 4; scene.add(body);
+        for (const f of [0.34, 0.62]) { const rr = 0.95 - 0.85 * f; box(rr * 1.9, 0.26, rr * 1.9, white, q.x, 0.3 + h * f, q.y); box(rr * 1.95, 0.08, rr * 1.95, bas(0xffe9b0), q.x, 0.3 + h * f - 0.16, q.y); }
+        box(0.06, 1.6, 0.06, white, q.x, h + 1.1, q.y);
+        const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.13, 8, 6), bas(0xff5a4a)); beacon.position.set(q.x, h + 1.95, q.y); scene.add(beacon);
+        tag(q.label, q.x, h + 2.7, q.y, q.labelColor || '#ffb0a0', 0.5);
+      } else if (q.type === 'torii') {     // a shrine gate standing over a lane: nothing solid in the road
+        const hw = (q.w || 2.4) / 2, mat = cutMat(q.color || 0xc8352b), alongX = q.dir === 'x';
+        for (const sd of [-1, 1]) cyl(0.11, 0.13, 2.2, 8, mat, q.x + (alongX ? 0 : sd * hw), 1.1, q.y + (alongX ? sd * hw : 0));
+        box(alongX ? 0.22 : hw * 2 + 0.9, 0.16, alongX ? hw * 2 + 0.9 : 0.22, mat, q.x, 2.28, q.y);
+        box(alongX ? 0.26 : hw * 2 + 1.2, 0.1, alongX ? hw * 2 + 1.2 : 0.26, cutMat(0x2a2422), q.x, 2.41, q.y);
+        box(alongX ? 0.14 : hw * 2 + 0.3, 0.12, alongX ? hw * 2 + 0.3 : 0.14, mat, q.x, 1.86, q.y);
+        tag(q.label, q.x, 3.2, q.y, q.labelColor || '#ffc0b0', 0.42);
+      } else if (q.type === 'pagoda') {    // stacked storeys, each under a wide dark roof
+        const r = M[q.mark]; if (r) cellBoxes(r, () => 0.25, cutMat(0x6a665e));
+        const tiers = q.tiers || 4, wall = cutMat(q.color || 0xb8442e), roofM = cutMat(0x2b2a30);
+        let y = 0.25, wd = q.w || 1.7;
+        for (let k = 0; k < tiers; k++) {
+          box(wd, 0.62, wd, wall, q.x, y + 0.31, q.y); y += 0.62;
+          const rf = new THREE.Mesh(new THREE.CylinderGeometry(wd * 0.5, wd * 0.98, 0.3, 4), roofM); rf.position.set(q.x, y + 0.15, q.y); rf.rotation.y = Math.PI / 4; scene.add(rf); y += 0.3;
+          box(wd * 0.5, 0.06, 0.05, bas(0xffd9a0), q.x, y - 0.62, q.y + wd / 2 + 0.03);
+          wd *= 0.8;
+        }
+        box(0.05, 0.9, 0.05, lam(0xc9a24a), q.x, y + 0.45, q.y);
+        tag(q.label, q.x, y + 1.5, q.y, q.labelColor || '#ffd9a0', 0.44);
+      } else if (q.type === 'screen') {    // a big video screen on a wall or a roof
+        const m = box(q.w, q.h, 0.08, bas(q.color), q.x, q.y0 + q.h / 2, q.y); m.rotation.y = q.ry || 0;
+        const fr = box(q.w + 0.16, q.h + 0.16, 0.05, lam(0x15171d), q.x - Math.sin(q.ry || 0) * 0.04, q.y0 + q.h / 2, q.y - Math.cos(q.ry || 0) * 0.04); fr.rotation.y = q.ry || 0;
+        if (q.color2 != null) { const st = box(q.w * 0.86, q.h * 0.22, 0.1, bas(q.color2), q.x, q.y0 + q.h * 0.3, q.y); st.rotation.y = q.ry || 0; }
+      } else if (q.type === 'lanterns') {  // a string of paper lanterns along a lane
+        const n = q.n || 10, im = new THREE.InstancedMesh(new THREE.SphereGeometry(0.09, 8, 6), bas(q.color || 0xff5a3a), n);
+        for (let k = 0; k < n; k++) { const f = (k + 0.5) / n; dummy.position.set(q.x0 + (q.x1 - q.x0) * f, (q.h || 1.15) - Math.sin(f * Math.PI) * 0.12, q.y0 + (q.y1 - q.y0) * f); dummy.rotation.set(0, 0, 0); dummy.scale.set(1, 1.25, 1); dummy.updateMatrix(); im.setMatrixAt(k, dummy.matrix); }
+        im.frustumCulled = false; scene.add(im);
+      } else if (q.type === 'label') tag(q.text, q.x, q.h || 2, q.y, q.color, q.size);
+    }
+  }
   // buses, wagon, mail coach
   for (const p of W.solidProps) {
     const w = p.x1 - p.x0, d = p.y1 - p.y0, cx = (p.x0 + p.x1) / 2, cz = (p.y0 + p.y1) / 2;
     if (p.kind === 'bus') { box(w, 0.62, d, cutMat(p.c), cx, 0.39, cz); box(w * 0.92, 0.18, d + 0.02, bas(0x6f8796), cx, 0.5, cz); box(w * 0.96, 0.05, d * 0.9, lam(0xdedede), cx, 0.72, cz); }
     else if (p.kind === 'wagon') { box(w, 0.42, d, cutMat(p.c), cx, 0.33, cz); box(w * 0.94, 0.06, d * 0.8, lam(0x2a1a12), cx, 0.5, cz); }
+    else if (p.kind === 'van') { box(w, 0.6, d, cutMat(p.c), cx, 0.4, cz); box(w * 0.3, 0.24, d + 0.02, bas(0x9fc4d8), cx + w * 0.3, 0.52, cz); box(w * 0.5, 0.1, d + 0.03, bas(0xf3b43f), cx - w * 0.15, 0.36, cz); }
+    else if (p.kind === 'crate') { box(w, p.h || 0.55, d, cutMat(p.c), cx, (p.h || 0.55) / 2, cz); }
     else { box(w, 0.7, d, cutMat(p.c), cx, 0.45, cz); box(w * 0.9, 0.16, d + 0.02, bas(0xffe9a8), cx, 0.55, cz); }
   }
   const boat = W.escapes.find(e => /Naav/.test(e.name));
@@ -372,7 +450,7 @@ export function buildScene(scene, map, W, U, quality) {
     const g = new THREE.Group(); g.position.set(s.x, 0, s.y); scene.add(g);
     const gem = new THREE.Mesh(gemGeo, bas(COLORS.loot)); gem.position.y = 0.95; gem.scale.setScalar(sc); g.add(gem);
     const beam = new THREE.Mesh(beamGeo, beamMat(COLORS.loot)); beam.scale.set(sc, 1, sc); g.add(beam);
-    const label = makeLabel(`${s.name}  ₹${CFG.VALUE[s.tier] || s.value}`, { color: '#ffd98a', h: s.tier === 3 ? 0.5 : 0.4, border: s.tier === 3 ? 'rgba(243,180,63,0.9)' : null });
+    const label = makeLabel(`${s.name}  ${map.currency || '₹'}${CFG.VALUE[s.tier] || s.value}`, { color: '#ffd98a', h: s.tier === 3 ? 0.5 : 0.4, border: s.tier === 3 ? 'rgba(243,180,63,0.9)' : null });
     label.position.set(0, 1.75 + sc * 0.2, 0); g.add(label);
     const lock = makeLabel('LOCKED', { color: '#ff9c9c', h: 0.3 }); lock.position.set(0, 1.35, 0); lock.visible = false; g.add(lock);
     H.siteVis.push({ g, gem, beam, label, lock, state: -1, sc });
@@ -402,7 +480,7 @@ export function buildScene(scene, map, W, U, quality) {
   const hctx = { cutMat, makeLabel };
   for (const h of W.hides) {
     const kind = h.grove ? 'grove' : kindFor(h.kind);
-    const ho = buildHideout({ kind, w: h.bay.w, d: h.bay.d, seed: h.i * 7 + 3 }, hctx);
+    const ho = buildHideout({ kind, w: h.bay.w, d: h.bay.d, seed: h.i * 7 + 3, name: h.given || '' }, hctx);
     ho.setClosed(1);   // every door is shut unless someone is going in or out, so a shut door tells the police nothing
     ho.g.position.set(h.x, 0, h.y); ho.g.rotation.y = h.a; scene.add(ho.g);
     const label = makeLabel(ho.name || kind, { color: '#d9ccff', h: 0.34 }); label.position.set(h.x, 1.35, h.y); scene.add(label);

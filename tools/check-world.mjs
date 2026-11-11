@@ -3,7 +3,10 @@
 import fs from 'fs';
 import { buildWorld, N, CS, T } from '../js/world.js';
 
-const map = JSON.parse(fs.readFileSync(new URL('../data/map.json', import.meta.url), 'utf8'));
+// node tools/check-world.mjs            checks data/map.json
+// node tools/check-world.mjs hotaru     checks data/map-hotaru.json
+const file = process.argv[2] ? '../data/map-' + process.argv[2] + '.json' : '../data/map.json';
+const map = JSON.parse(fs.readFileSync(new URL(file, import.meta.url), 'utf8'));
 const W = buildWorld(map);
 const flood = (start, ok) => {
   const seen = new Uint8Array(N * N), q = [start]; seen[start] = 1;

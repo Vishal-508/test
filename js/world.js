@@ -10,7 +10,6 @@ export const LANE = { NONE: 0, OPEN: 1, ALLEY: 2, STREET: 3, MAIN: 4, DRAIN: 5, 
 const HW = { main: 1.5, street: 1.0, alley: 0.8, plank: 0.8, bridge: 1.5, drain: 1.2 };
 const LANE_OF = { main: LANE.MAIN, bridge: LANE.MAIN, street: LANE.STREET, alley: LANE.ALLEY, plank: LANE.ALLEY, drain: LANE.DRAIN };
 const GALI_HW = 0.75;
-const OPEN_ROUTES = new Set(['Ganda Nala Bed']);   // every other shortcut is a tang gali: too narrow for a police jeep
 const BAY_W = 1.5, BAY_D = 2.0;
 
 export function hash2(i, j) {
@@ -37,7 +36,51 @@ const STYLE = {
 };
 export const LAMP = { patri: 0xffe2a0, afsar: 0xdce6ff, ghat: 0x9dffb4, basti: 0xffa860, sarafa: 0xffd29a, kotwali: 0xeef2ff, bagh: 0xffd9a0 };
 
+// Everything about a town that is not roads and places: open ground, the police yard, landmarks' footprints, edges.
+// A map file may carry its own "layout"; data/map.json (Jugnupur) uses this one.
+const JUGNUPUR = {
+  id: 'jugnupur',
+  park: { x0: 24.5, y0: 52.5, x1: 47.5, y1: 75.5 },
+  open: [
+    { x0: 53.5, y0: 37.5, x1: 62.5, y1: 46.5, kind: 'open', paint: 'yard' },
+    { x0: 88.5, y0: 44.5, x1: 97.5, y1: 61.5, kind: 'open', paint: 'lot' },
+    { x0: 46.5, y0: 46.5, x1: 53.5, y1: 53.5, kind: 'main' },   // Ghanta Ghar chowk: a square ring of road round the clock tower
+  ],
+  openRoutes: ['Ganda Nala Bed'],   // every other shortcut is a tang gali: too narrow for a police jeep
+  routeFix: { 'Baad Surang': [{ x: 76, y: 27 }, { x: 84, y: 27 }, { x: 84, y: 16 }, { x: 88, y: 16 }] },   // squared off so it can be driven
+  // doorways the drawing implies: thana gate, the gali behind the bank, the jeweller's back lane, the haveli's broken wall
+  doors: [[58, 46.5, 58, 50, 1.0, 1, 'street'], [76, 27, 76, 30, 0.75, 1, 'alley'], [84, 27, 84, 30, 0.75, 1, 'alley'], [28, 26, 30, 26, 0.75, 0, 'gali'], [28, 26, 28, 28, 0.75, 0, 'gali'], [88, 16, 88, 12.5, 0.75, 0, 'gali']],
+  cage: { x0: 53.5, y0: 37.5, x1: 57, y1: 39.5 },
+  marks: {
+    thana: { x0: 59.5, y0: 38, x1: 62.5, y1: 43.5, always: 1 },
+    clock: { x0: 49.5, y0: 49.5, x1: 50.5, y1: 50.5, always: 1 },
+    station: { x0: 43.6, y0: 4.8, x1: 48.4, y1: 7.6 },
+    tank: { x0: 9.5, y0: 5.5, x1: 10.5, y1: 6.5 },
+    chimney: { x0: 4.4, y0: 45.4, x1: 5.6, y1: 46.6 },
+    mandir: { x0: 53.2, y0: 92.2, x1: 54.8, y1: 93.8 },
+    talkies: { x0: 38.5, y0: 51.5, x1: 45.5, y1: 52.5 },
+    ruin: { x0: 85.5, y0: 9.5, x1: 90.5, y1: 15 },
+    scrap: { x0: 9.5, y0: 85.5, x1: 14.8, y1: 90.8 },
+  },
+  props: [
+    { kind: 'bus', x0: 89.5, y0: 46, x1: 92.5, y1: 47.2, c: 0xb8442e }, { kind: 'bus', x0: 93.5, y0: 46, x1: 96.5, y1: 47.2, c: 0x2e6fb8 },
+    { kind: 'bus', x0: 89.5, y0: 58.6, x1: 92.5, y1: 59.8, c: 0x2e6fb8 }, { kind: 'bus', x0: 93.5, y0: 58.6, x1: 96.5, y1: 59.8, c: 0xb8442e },
+    { kind: 'bus', x0: 93.9, y0: 53.4, x1: 96.9, y1: 54.6, c: 0xc79a2a },
+    { kind: 'wagon', x0: 14, y0: 7.5, x1: 18, y1: 8.4, c: 0x6a3c2a },
+    { kind: 'coach', x0: 53, y0: 5.9, x1: 59, y1: 6.8, c: 0x7a2330 },
+  ],
+  policeSpawns: [{ x: 54.6, y: 41.2, a: 0 }, { x: 55.8, y: 41.2, a: 0 }, { x: 57, y: 41.2, a: 0 }, { x: 54.6, y: 43.4, a: 0 }, { x: 55.8, y: 43.4, a: 0 }, { x: 57, y: 43.4, a: 0 }, { x: 58.2, y: 44.6, a: 0 }, { x: 54.6, y: 45.4, a: 0 }],
+  cageSlots: [{ x: 54.0, y: 38.05 }, { x: 54.85, y: 38.05 }, { x: 55.7, y: 38.05 }, { x: 56.55, y: 38.05 }, { x: 54.0, y: 38.95 }, { x: 54.85, y: 38.95 }, { x: 55.7, y: 38.95 }, { x: 56.55, y: 38.95 }],
+  releasePoints: [{ x: 50.5, y: 38.5, a: Math.PI }, { x: 57.5, y: 36, a: -Math.PI / 2 }],
+  waterY: 94.6, railY: 4.7,
+  glows: [[58, 42, 5.5, 0xcfd8ff, 0.16], [50, 50, 4.5, 0xfff0b0, 0.22], [42, 51, 3.2, 0xff5fa0, 0.24], [50, 7, 4, 0xffe2a0, 0.2]],
+  thanaName: 'KOTWALI THANA',
+};
+const KIND_OF = { open: LANE.OPEN, main: LANE.MAIN, street: LANE.STREET, alley: LANE.ALLEY, gali: LANE.GALI };
+
 export function buildWorld(map) {
+  const L = map.layout || JUGNUPUR;
+  const STYLES = Object.assign({}, STYLE, L.styles || {}), LAMPS = Object.assign({}, LAMP, L.lamps || {});
   const type = new Uint8Array(N * N).fill(T.BLDG);
   const ai = new Uint8Array(N * N);      // 1 where a police jeep may drive
   const lane = new Uint8Array(N * N);    // what kind of ground a drivable cell is
@@ -72,30 +115,29 @@ export function buildWorld(map) {
   const stamp = (x0, y0, x1, y1, val, onlyIf) => rect(x0, y0, x1, y1, k => { if (onlyIf == null || type[k] === onlyIf) { type[k] = val; ai[k] = 0; lane[k] = 0; } });
 
   const districts = map.districts;
-  const districtAt = (x, y) => { for (const d of districts) if (x >= d.x && x < d.x + d.w && y >= d.y && y < d.y + d.h) return d.id; return 'patri'; };
-  const park = districts.find(d => d.id === 'bagh');
-  const inPark = (x, y) => x > park.x + 2 && x < park.x + park.w - 2 && y > park.y + 2 && y < park.y + park.h - 2;
+  const districtAt = (x, y) => { for (const d of districts) if (x >= d.x && x < d.x + d.w && y >= d.y && y < d.y + d.h) return d.id; return districts[0].id; };
+  const park = L.park || null;
+  const pin = park ? { x0: park.x0 - 0.5, y0: park.y0 - 0.5, x1: park.x1 + 0.5, y1: park.y1 + 0.5 } : null;
+  const inPark = (x, y) => !!pin && x > pin.x0 && x < pin.x1 && y > pin.y0 && y < pin.y1;
 
   // --- open areas: the park, the thana yard, the bus stand
-  carveRect(24.5, 52.5, 47.5, 75.5, LANE.OPEN);
+  if (park) carveRect(park.x0, park.y0, park.x1, park.y1, LANE.OPEN);
   const trees = [];
-  for (let gx = 27; gx <= 45.5; gx += 3.6) for (let gy = 55; gy <= 73.5; gy += 3.6) {
+  if (park) for (let gx = park.x0 + 2.5; gx <= park.x1 - 2; gx += 3.6) for (let gy = park.y0 + 2.5; gy <= park.y1 - 2; gy += 3.6) {
     const r = hash2(gx * 10, gy * 10);
     if (r > 0.74) continue;
     const tx = gx + (hash2(gx * 7, gy * 3) - 0.5) * 2.2, ty = gy + (hash2(gx * 3, gy * 11) - 0.5) * 2.2;
     trees.push({ x: tx, y: ty, s: 0.8 + r * 0.6 });
     stamp(tx - 0.5, ty - 0.5, tx + 0.5, ty + 0.5, T.PROP);
   }
-  carveRect(53.5, 37.5, 62.5, 46.5, LANE.OPEN);
-  carveRect(88.5, 44.5, 97.5, 61.5, LANE.OPEN);
-  carveRect(46.5, 46.5, 53.5, 53.5, LANE.MAIN);   // Ghanta Ghar chowk: a square ring of road round the clock tower
+  for (const o of (L.open || [])) carveRect(o.x0, o.y0, o.x1, o.y1, KIND_OF[o.kind] || LANE.OPEN);
 
   // --- tang galis (chor only), then every road, street and alley
   const galis = [];
   for (const r of map.special_routes) {
     let pts = r.points.map(p => ({ x: p.x, y: p.y }));
-    if (r.name === 'Baad Surang') pts = [{ x: 76, y: 27 }, { x: 84, y: 27 }, { x: 84, y: 16 }, { x: 88, y: 16 }];   // squared off so it can be driven
-    const open = OPEN_ROUTES.has(r.name);
+    if (L.routeFix && L.routeFix[r.name]) pts = L.routeFix[r.name];
+    const open = (L.openRoutes || []).indexOf(r.name) >= 0;
     poly(pts, open ? HW.alley : GALI_HW, open, open ? LANE.ALLEY : LANE.GALI, r.name);
     if (!open) galis.push({ name: r.name, points: pts });
   }
@@ -105,13 +147,7 @@ export function buildWorld(map) {
     const pts = r.kind === 'drain' ? r.points.map(p => ({ x: p.x, y: Math.min(p.y, 93.2) })) : r.points;
     poly(pts, hw, true, LANE_OF[r.kind], r.name);
   }
-  // doorways the drawing implies: thana gate, the gali behind the bank, the jeweller's back lane, the haveli's broken wall
-  carve(58, 46.5, 58, 50, 1.0, true, LANE.STREET);
-  carve(76, 27, 76, 30, 0.75, true, LANE.ALLEY);
-  carve(84, 27, 84, 30, 0.75, true, LANE.ALLEY);
-  carve(28, 26, 30, 26, 0.75, false, LANE.GALI);
-  carve(28, 26, 28, 28, 0.75, false, LANE.GALI);
-  carve(88, 16, 88, 12.5, 0.75, false, LANE.GALI);
+  for (const d of (L.doors || [])) carve(d[0], d[1], d[2], d[3], d[4], !!d[5], KIND_OF[d[6]] || LANE.ALLEY);
 
   // --- places of interest get an apron and a link to the nearest lane a jeep can use
   const nearestLine = (x, y, needAi) => {
@@ -130,7 +166,7 @@ export function buildWorld(map) {
     return best ? Math.atan2(best.qx - x, best.qy - y) : 0;   // heading that points at the lane
   };
   const sites = map.rob_locations.map((s, i) => ({
-    i, id: s.id, name: s.short || s.name, full: s.name, gloss: s.gloss, tier: s.loot_tier, value: s.value, x: s.x, y: s.y, coach: s.id === 'r7',
+    i, id: s.id, name: s.short || s.name, full: s.name, gloss: s.gloss, tier: s.loot_tier, value: s.value, x: s.x, y: s.y, coach: s.coach != null ? !!s.coach : (L.id === 'jugnupur' && s.id === 'r7'),
   }));
   const escapes = map.escape_points.map((e, i) => ({ i, name: e.name, x: e.x, y: e.y }));
   const levers = (map.levers || []).map((l, i) => ({ i, name: l.name, x: l.x, y: l.y }));
@@ -143,29 +179,11 @@ export function buildWorld(map) {
   spawns.forEach(s => { s.a = poi(s.x, s.y, 1.2); });
 
   // --- solid props and landmark footprints
-  const cage = { x0: 53.5, y0: 37.5, x1: 57, y1: 39.5 };
+  const cage = L.cage;
   stamp(cage.x0, cage.y0, cage.x1, cage.y1, T.CAGE);
-  const marks = {
-    thana: { x0: 59.5, y0: 38, x1: 62.5, y1: 43.5 },
-    clock: { x0: 49.5, y0: 49.5, x1: 50.5, y1: 50.5 },
-    station: { x0: 43.6, y0: 4.8, x1: 48.4, y1: 7.6 },
-    tank: { x0: 9.5, y0: 5.5, x1: 10.5, y1: 6.5 },
-    chimney: { x0: 4.4, y0: 45.4, x1: 5.6, y1: 46.6 },
-    mandir: { x0: 53.2, y0: 92.2, x1: 54.8, y1: 93.8 },
-    talkies: { x0: 38.5, y0: 51.5, x1: 45.5, y1: 52.5 },
-    ruin: { x0: 85.5, y0: 9.5, x1: 90.5, y1: 15 },
-    scrap: { x0: 9.5, y0: 85.5, x1: 14.8, y1: 90.8 },
-  };
-  stamp(marks.thana.x0, marks.thana.y0, marks.thana.x1, marks.thana.y1, T.MARK);
-  stamp(marks.clock.x0, marks.clock.y0, marks.clock.x1, marks.clock.y1, T.MARK);
-  for (const k of ['station', 'tank', 'chimney', 'mandir', 'talkies', 'ruin', 'scrap']) { const m = marks[k]; stamp(m.x0, m.y0, m.x1, m.y1, T.MARK, T.BLDG); }
-  const solidProps = [
-    { kind: 'bus', x0: 89.5, y0: 46, x1: 92.5, y1: 47.2, c: 0xb8442e }, { kind: 'bus', x0: 93.5, y0: 46, x1: 96.5, y1: 47.2, c: 0x2e6fb8 },
-    { kind: 'bus', x0: 89.5, y0: 58.6, x1: 92.5, y1: 59.8, c: 0x2e6fb8 }, { kind: 'bus', x0: 93.5, y0: 58.6, x1: 96.5, y1: 59.8, c: 0xb8442e },
-    { kind: 'bus', x0: 93.9, y0: 53.4, x1: 96.9, y1: 54.6, c: 0xc79a2a },
-    { kind: 'wagon', x0: 14, y0: 7.5, x1: 18, y1: 8.4, c: 0x6a3c2a },
-    { kind: 'coach', x0: 53, y0: 5.9, x1: 59, y1: 6.8, c: 0x7a2330 },
-  ];
+  const marks = L.marks || {};
+  for (const k of Object.keys(marks)) { const m = marks[k]; stamp(m.x0, m.y0, m.x1, m.y1, T.MARK, m.always ? null : T.BLDG); }
+  const solidProps = L.props || [];
   for (const p of solidProps) stamp(p.x0, p.y0, p.x1, p.y1, T.PROP);
   for (const s of [...sites, ...escapes]) rect(s.x - 0.9, s.y - 0.9, s.x + 0.9, s.y + 0.9, k => { if (type[k] === T.PROP) { type[k] = T.WALK; ai[k] = 1; lane[k] = LANE.OPEN; } });
 
@@ -173,13 +191,13 @@ export function buildWorld(map) {
   //     from the lane outside its door (front), is parked inside by the game, and police search it from the lane.
   const hides = [];
   const bayFree = (x0, y0, x1, y1) => {
-    if (x0 < 1.5 || y0 < 5.5 || x1 > 98.5 || y1 > 93.8) return false;
+    if (x0 < 1.5 || y0 < (L.railY != null ? L.railY + 0.8 : 1.5) || x1 > 98.5 || y1 > (L.waterY != null ? L.waterY - 0.8 : 98.5)) return false;
     let ok = true;
     rect(x0, y0, x1, y1, k => { if (type[k] !== T.BLDG) ok = false; });
     return ok;
   };
   map.hiding_spots.forEach((h, i) => {
-    const rec = { i, kind: h.kind, x: h.x, y: h.y, a: 0, bay: null, mouth: null, front: null, grove: false };
+    const rec = { i, kind: h.kind, given: h.name || '', x: h.x, y: h.y, a: 0, bay: null, mouth: null, front: null, grove: false };
     if (inPark(h.x, h.y)) { // in the open park: a thicket, entered from the side nearest a path
       const best = nearestLine(h.x, h.y, true);
       let dx = best ? best.qx - h.x : 0, dy = best ? best.qy - h.y : 1; const dl = Math.hypot(dx, dy) || 1;
@@ -230,8 +248,8 @@ export function buildWorld(map) {
   // --- river and railway are open ground nobody can cross
   for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
     const k = idx(i, j), cy = (j + 0.5) * CS;
-    if (type[k] === T.BLDG && cy >= 94.6) type[k] = T.WATER;
-    else if (type[k] === T.BLDG && cy < 4.7) type[k] = T.RAIL;
+    if (type[k] === T.BLDG && L.waterY != null && cy >= L.waterY) type[k] = T.WATER;
+    else if (type[k] === T.BLDG && L.railY != null && cy < L.railY) type[k] = T.RAIL;
     if (type[k] !== T.WALK) { ai[k] = 0; lane[k] = 0; }
   }
 
@@ -240,7 +258,7 @@ export function buildWorld(map) {
   const styleAt = (x, y) => { const d = districtAt(x, y); return d === 'basti' ? (y < 60 ? 'mill' : 'huts') : d; };
   for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
     if (type[idx(i, j)] !== T.BLDG || used[idx(i, j)]) continue;
-    const sk = styleAt((i + 0.5) * CS, (j + 0.5) * CS), st = STYLE[sk];
+    const sk = styleAt((i + 0.5) * CS, (j + 0.5) * CS), st = STYLES[sk] || STYLE.kotwali;
     const maxW = 3 + Math.floor(hash2(i, j) * st.max), maxD = 3 + Math.floor(hash2(j, i + 91) * st.max);
     let w = 0;
     while (w < maxW && i + w < N && type[idx(i + w, j)] === T.BLDG && !used[idx(i + w, j)] && styleAt((i + w + 0.5) * CS, (j + 0.5) * CS) === sk) w++;
@@ -256,7 +274,7 @@ export function buildWorld(map) {
   // --- building faces that look onto a street or main road: where shop signs and shutters can hang
   const facades = [];
   for (const b of boxes) {
-    if (b.h < 0.5 || b.style === 'bagh' || b.style === 'ghat') continue;
+    if (b.h < 0.5 || b.style === 'bagh' || b.style === 'ghat' || (STYLES[b.style] && STYLES[b.style].plain)) continue;
     const i0 = Math.round(b.x / CS), j0 = Math.round(b.y / CS), w = Math.round(b.w / CS), d = Math.round(b.d / CS);
     const side = (count, cellAt, fx, fy, nx, ny) => {
       let run = -1, kind = 0;
@@ -285,7 +303,7 @@ export function buildWorld(map) {
       const ux = (b.x - a.x) / L, uy = (b.y - a.y) / L;
       while (carry <= L) {
         const side = (n++ % 2) ? 1 : -1, x = a.x + ux * carry - uy * off * side, y = a.y + uy * carry + ux * off * side;
-        if (x > 1 && x < 99 && y > 5 && y < 94) lamps.push({ x, y, c: LAMP[districtAt(x, y)], post, r: rad, dx: uy * side, dy: -ux * side });   // dx,dy point from the post toward the road centre
+        if (x > 1 && x < 99 && y > 5 && y < 94) lamps.push({ x, y, c: LAMPS[districtAt(x, y)] || 0xffe2a0, post, r: rad, dx: uy * side, dy: -ux * side });   // dx,dy point from the post toward the road centre
         carry += step;
       }
       carry -= L;
@@ -462,9 +480,7 @@ export function buildWorld(map) {
   return {
     type, ai, lane, boxes, facades, lamps, trees, lines, marks, solidProps, cage, galis,
     sites, hides, escapes, levers, posts, spawns,
-    policeSpawns: [{ x: 54.6, y: 41.2, a: 0 }, { x: 55.8, y: 41.2, a: 0 }, { x: 57, y: 41.2, a: 0 }, { x: 54.6, y: 43.4, a: 0 }, { x: 55.8, y: 43.4, a: 0 }, { x: 57, y: 43.4, a: 0 }, { x: 58.2, y: 44.6, a: 0 }, { x: 54.6, y: 45.4, a: 0 }],
-    cageSlots: [{ x: 54.0, y: 38.05 }, { x: 54.85, y: 38.05 }, { x: 55.7, y: 38.05 }, { x: 56.55, y: 38.05 }, { x: 54.0, y: 38.95 }, { x: 54.85, y: 38.95 }, { x: 55.7, y: 38.95 }, { x: 56.55, y: 38.95 }],
-    releasePoints: [{ x: 50.5, y: 38.5, a: Math.PI }, { x: 57.5, y: 36, a: -Math.PI / 2 }],
+    policeSpawns: L.policeSpawns, cageSlots: L.cageSlots, releasePoints: L.releasePoints, layout: L, park,
     districtAt, inPark, walkable, policeOk, solidChor, solidPolice, laneAt, los, findPath, nearestWalk, safeSpot,
   };
 }

@@ -984,7 +984,7 @@ export function buildHideout(spec, ctx) {
   const size = (v, def, lo, hi) => { v = +v; return v > 0 ? Math.max(lo, Math.min(hi, v)) : def; };   // NaN, 0 and negatives give the default
   const w = size(spec.w, 1.5, 1.2, 4), d = size(spec.d, 2.0, 1.6, 4), seed = Math.floor(+spec.seed || 0) | 0;
   const kindNo = HIDEOUT_KINDS.indexOf(kind), hw = w / 2, hd = d / 2;
-  const name = nameFor(kind, seed);
+  const name = (typeof spec.name === 'string' && spec.name.trim()) ? spec.name.trim().slice(0, 28) : nameFor(kind, seed);
   const g = new THREE.Group(); g.name = 'hideout:' + kind;
   const roofs = new Map(), own = [];
   const o = {

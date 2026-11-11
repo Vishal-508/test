@@ -98,7 +98,8 @@ function estWidth(text) {
     if (c >= 0x900 && c <= 0x97f) {   // Devanagari: marks above and below take no room, vowel signs beside the letter a little
       if (c <= 0x902 || c === 0x93c || (c >= 0x941 && c <= 0x948) || c === 0x94d) continue;
       w += (c === 0x903 || (c >= 0x93e && c <= 0x940) || (c >= 0x949 && c <= 0x94c)) ? 0.32 : 0.7;
-    } else if (ch === ' ') w += 0.3;
+    } else if (c >= 0x2e80) w += 1.0;   // Japanese and other full-width lettering
+    else if (ch === ' ') w += 0.3;
     else if ('iljtfrI1.'.indexOf(ch) >= 0) w += 0.4;
     else if ('mwMW'.indexOf(ch) >= 0) w += 0.95;
     else if (ch >= 'A' && ch <= 'Z') w += 0.74;
@@ -111,19 +112,23 @@ const even = v => Math.ceil(v / 2) * 2;
 // ---------------------------------------------------------------- atlas layout (no DOM needed)
 // Hoardings fill the first rows, then every sign cell goes into the first row with room (widest first).
 // A cell that finds no room gets rect = null and the boards that would need it are simply never chosen.
+// What the boards say can come from the map file (another country, another script). null = the built-in boards above.
+let VOCAB = null, DEF_VOCAB = null;
+const voc = () => VOCAB || DEF_VOCAB || (DEF_VOCAB = { names: NAMES, trades: TRADES, singles: SINGLES, hoardings: HOARDINGS, weights: WEIGHT, hoardIn: ['kotwali', 'sarafa'], script: 'deva', target: SIGN_TARGET });
 let LAYOUT = null;
 function layout() {
   if (LAYOUT) return LAYOUT;
+  const V = voc();
   const cursor = new Array(ROWS).fill(0);
-  const hoardings = HOARDINGS.map((art, i) => {
+  const hoardings = V.hoardings.map((art, i) => {
     const band = Math.floor(i / 4), x = GUT / 2 + (i % 4) * (HOARD_W + GUT);
     if ((band + 1) * 2 > ROWS) return { art, rect: null };
     cursor[band * 2] = cursor[band * 2 + 1] = x + HOARD_W + GUT / 2;
     return { art, rect: { x, y: band * HOARD_H, w: HOARD_W, h: HOARD_H } };
   });
-  const names = NAMES.map(n => ({ t: n.t, only: n.only || null, w: even(PAD + estWidth(n.t) * FONT_PX + HALF_GAP), rect: null }));
-  const trades = TRADES.map(n => ({ t: n.t, d: n.d || [], home: n.home || 4, tint: n.tint, w: even(PAD + estWidth(n.t) * FONT_PX + HALF_GAP), rect: null }));
-  const singles = SINGLES.map(n => ({ t: n.t, alt: n.alt || null, max: n.max || 1, d: n.d || null, tint: n.tint, w: Math.max(SINGLE_MIN, even(2 * PAD + estWidth(n.t) * (FONT_PX + 1))), rect: null }));
+  const names = V.names.map(n => ({ t: n.t, only: n.only || null, w: even(PAD + estWidth(n.t) * FONT_PX + HALF_GAP), rect: null }));
+  const trades = V.trades.map(n => ({ t: n.t, d: n.d || [], home: n.home || 4, tint: n.tint, w: even(PAD + estWidth(n.t) * FONT_PX + HALF_GAP), rect: null }));
+  const singles = V.singles.map(n => ({ t: n.t, alt: n.alt || null, max: n.max || 1, d: n.d || null, tint: n.tint, w: Math.max(SINGLE_MIN, even(2 * PAD + estWidth(n.t) * (FONT_PX + 1))), rect: null }));
   const all = names.concat(trades, singles).map((cell, i) => ({ cell, i })).sort((a, b) => b.cell.w - a.cell.w || a.i - b.i);
   let missing = 0;
   for (const { cell } of all) {
@@ -141,8 +146,10 @@ function uvOf(r) { return [(r.x + 0.5) / ATLAS_W, 1 - (r.y + r.h - 0.5) / ATLAS_
 // ---------------------------------------------------------------- atlas painting
 const BOARD = '#15161b', TUBE = '#ffffff';
 const latinFont = px => `700 ${px.toFixed(1)}px "Baloo 2","Trebuchet MS","Segoe UI",system-ui,sans-serif`;
-const devaFont = px => `700 ${px.toFixed(1)}px "Noto Sans Devanagari","Nirmala UI","Kohinoor Devanagari","Devanagari Sangam MN","Mangal",sans-serif`;
-const isDeva = text => /[\u0900-\u097f]/.test(text);
+const devaFont = px => (voc().script === 'jp'
+  ? `700 ${px.toFixed(1)}px "Noto Sans JP","Hiragino Kaku Gothic ProN","Hiragino Sans","Yu Gothic","Meiryo","Noto Sans CJK JP","MS Gothic",sans-serif`
+  : `700 ${px.toFixed(1)}px "Noto Sans Devanagari","Nirmala UI","Kohinoor Devanagari","Devanagari Sangam MN","Mangal",sans-serif`);
+const isDeva = text => /[^\u0000-\u024f]/.test(text);   // any lettering outside the Latin ranges (Devanagari, Japanese, ...)
 const num = (v, d) => (typeof v === 'number' && isFinite(v) ? v : d);
 
 // True when this device can really draw Devanagari (two letters come out different, and not as the
@@ -153,7 +160,8 @@ function canDrawDevanagari() {
     const c = cv.getContext('2d', { willReadFrequently: true });
     if (!c) return false;
     const shot = ch => { c.fillStyle = '#000'; c.fillRect(0, 0, 64, 32); c.fillStyle = '#fff'; c.font = devaFont(22); c.textBaseline = 'middle'; c.fillText(ch, 6, 16); return c.getImageData(0, 0, 64, 32).data; };
-    const ka = shot('\u0915'), ma = shot('\u092e'), none = shot('\uffff');   // ka, ma, and a code point no font has
+    const jp = voc().script === 'jp';
+    const ka = shot(jp ? '\u3042' : '\u0915'), ma = shot(jp ? '\u306e' : '\u092e'), none = shot('\uffff');   // ka, ma, and a code point no font has
     let ink = 0, differ = 0, notBox = 0;
     for (let i = 0; i < ka.length; i += 4) { if (ka[i] > 60) ink++; if (Math.abs(ka[i] - ma[i]) > 40) differ++; if (Math.abs(ka[i] - none[i]) > 40) notBox++; }
     return ink > 12 && differ > 6 && notBox > 6;
@@ -481,7 +489,7 @@ function planSigns(W, rnd) {
   const hoardings = [], taken = new Set();
   const arts = L.hoardings.filter(hb => hb.rect);
   for (const pass of [{ h: 1.1, gap: 9 }, { h: 1.1, gap: 5 }, { h: 1.0, gap: 3 }]) {
-    const cands = list.filter(f => !taken.has(f) && f.kind === 'main' && (f.district === 'kotwali' || f.district === 'sarafa') && f.h >= pass.h && f.half >= HOARD_SW / 2 + 0.05)
+    const cands = list.filter(f => !taken.has(f) && f.kind === 'main' && voc().hoardIn.indexOf(f.district) >= 0 && f.h >= pass.h && f.half >= HOARD_SW / 2 + 0.05)
       .map(f => ({ f, key: rnd(f.kx, f.kz, 3) * (f.district === 'sarafa' ? 0.45 : 1) })).sort((a, b) => a.key - b.key || a.f.i - b.f.i);   // the Sarafa's walls are lower and fewer, so they go first
     for (const { f } of cands) {
       if (hoardings.length >= Math.min(HOARDING_TARGET, arts.length ? 8 : 0)) break;
@@ -494,7 +502,7 @@ function planSigns(W, rnd) {
   // --- shop signs: a weighted draw over every facade with room for a board
   const pool = [];
   for (const f of list) {
-    const wgt = WEIGHT[f.district] || 0, hmax = Math.min(SIGN_H1, f.h - ROOF_GAP - SIGN_Y), room = Math.min(SIGN_W1, f.half * 2);
+    const wgt = voc().weights[f.district] || 0, hmax = Math.min(SIGN_H1, f.h - ROOF_GAP - SIGN_Y), room = Math.min(SIGN_W1, f.half * 2);
     if (taken.has(f) || wgt <= 0 || hmax < SIGN_H0 || room < SIGN_W0) continue;
     pool.push({ f, hmax, room, key: rnd(f.kx, f.kz, 1) / wgt });   // lowest key first: a wall's chance is in proportion to its district's weight
   }
@@ -502,7 +510,7 @@ function planSigns(W, rnd) {
   const usedPair = new Set(), usedSingle = L.singles.map(() => 0), signs = [];
   const pickNeon = u => { let t = u * NEON_ODDS.reduce((a, b) => a + b, 0); for (let k = 0; k < NEON.length; k++) { t -= NEON_ODDS[k]; if (t <= 0) return k; } return 0; };
   for (const { f, hmax, room } of pool) {
-    if (signs.length >= SIGN_TARGET) break;
+    if (signs.length >= (voc().target || SIGN_TARGET)) break;
     // the board's width in atlas pixels must let it be 0.9 to 1.8 wide at a height of 0.22 to hmax
     const pMin = SIGN_W0 * ROW / hmax, pMax = room * ROW / SIGN_H0;
     const fits = p => p >= pMin - 1e-6 && p <= pMax + 1e-6;
@@ -607,6 +615,10 @@ const _dummy = new THREE.Object3D();
 // Returns { update(dt, time), dispose() } plus read-only extras: stats (counts), debug (where everything
 // was put) and group (the THREE.Group holding all of it).
 export function buildDressing(scene, W, ctx) {
+  const cv = ctx && ctx.vocab;
+  const next = cv && Array.isArray(cv.names) && Array.isArray(cv.trades) && Array.isArray(cv.singles)
+    ? { names: cv.names, trades: cv.trades, singles: cv.singles, hoardings: [], weights: cv.weights || {}, hoardIn: [], script: cv.script || 'latin', target: cv.target || SIGN_TARGET } : null;
+  if ((next || VOCAB) && JSON.stringify(next) !== JSON.stringify(VOCAB)) { VOCAB = next; LAYOUT = null; }
   const hash = ctx && typeof ctx.hash2 === 'function' ? ctx.hash2 : ownHash;
   const rnd = (a, b, salt) => hash(a * 3 + salt * 7919, b * 5 + salt * 104729);
   const U = ctx && ctx.U && ctx.U.uCut && ctx.U.uRes ? ctx.U : null;

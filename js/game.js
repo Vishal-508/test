@@ -15,7 +15,8 @@ const $ = id => document.getElementById(id);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 const r2 = v => Math.round(v * 100) / 100;
-const money = n => '₹' + Math.round(n).toLocaleString('en-IN');
+let CUR = '₹';   // the map file may name another currency sign
+const money = n => CUR + Math.round(n).toLocaleString('en-IN');
 const TAU = Math.PI * 2;
 const wrap = a => (Number.isFinite(a) ? a - TAU * Math.floor((a + Math.PI) / TAU) : 0);   // into -PI..PI without looping, whatever comes in
 const lerpAngle = (a, b, t) => a + wrap(b - a) * t;
@@ -377,8 +378,8 @@ function hostTick(dt) {
   const F = S.flags;
   if (!F.go && S.t >= CFG.COUNT) { F.go = 1; ev({ t: 'go', m: 'The police are rolling. Drive!' }); }
   if (!F.jack && S.t >= CFG.JACKPOT_AT) { F.jack = 1; ev({ t: 'chime', m: 'The clock tower chimes. The three tijoris are open!' }); }
-  if (!F.co && S.t >= CFG.COACH_OPEN) { F.co = 1; ev({ t: 'chime', m: 'The mail coach strongbox is open!' }); }
-  if (!F.cc && S.t >= CFG.COACH_CLOSE) { F.cc = 1; if (!S.sites[W.sites.findIndex(s => s.coach)].robbed) ev({ t: 'info', m: 'The mail coach has shut its strongbox.' }); }
+  if (!F.co && S.t >= CFG.COACH_OPEN) { F.co = 1; if (W.sites.some(s => s.coach)) ev({ t: 'chime', m: W.sites.find(q => q.coach).full + ' is open for 45 seconds!' }); }
+  if (!F.cc && S.t >= CFG.COACH_CLOSE) { F.cc = 1; const ci = W.sites.findIndex(s => s.coach); if (ci >= 0 && !S.sites[ci].robbed) ev({ t: 'info', m: W.sites[ci].full + ' is shut again.' }); }
   if (!F.min && S.t >= CFG.ROUND - 45) { F.min = 1; ev({ t: 'info', m: '45 seconds left!' }); }
   const all = [...S.players.values()], pol = all.filter(P => P.role === 'police'), started = S.t >= CFG.COUNT;
   hostOthers = [];
@@ -900,7 +901,7 @@ function updateHud(dt, time) {
   let phase = '';
   if (S.t < CFG.COUNT) phase = 'Police roll out in ' + Math.ceil(CFG.COUNT - S.t);
   else if (S.t < CFG.JACKPOT_AT) phase = 'Tijoris open in ' + Math.ceil(CFG.JACKPOT_AT - S.t) + 's';
-  else if (S.t >= CFG.COACH_OPEN && S.t < CFG.COACH_CLOSE) phase = 'Mail coach open ' + Math.ceil(CFG.COACH_CLOSE - S.t) + 's';
+  else if (S.t >= CFG.COACH_OPEN && S.t < CFG.COACH_CLOSE) phase = 'Strongbox open ' + Math.ceil(CFG.COACH_CLOSE - S.t) + 's';
   else if (left < 0) phase = 'Aakhri daud';
   setText('phase', phase);
   setText('lootText', money(S.banked) + ' / ' + money(S.target)); setBar('lootBar', S.banked / S.target);
@@ -1335,13 +1336,18 @@ function frame(now) {
 const focusPt = { x: 50, z: 50, set(x, z) { this.x = x; this.z = z; return this; } };
 
 async function boot() {
-  const map = await (await fetch('data/map.json')).json();
+  // ?map=hotaru loads data/map-hotaru.json; without it, Jugnupur
+  const mapId = (new URLSearchParams(location.search).get('map') || '').toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 24);
+  let map = null;
+  if (mapId) { try { const r = await fetch('data/map-' + mapId + '.json'); if (r.ok) map = await r.json(); } catch (e) { map = null; } }
+  if (!map) map = await (await fetch('data/map.json')).json();
+  if (typeof map.currency === 'string' && map.currency.length <= 3) CUR = map.currency;
   try { await Promise.race([Promise.all([document.fonts.load('700 46px "Baloo 2"'), document.fonts.load('600 16px "Hind"')]), new Promise(r => setTimeout(r, 1800))]); } catch (e) { /* fall back to system fonts */ }
   W = buildWorld(map);
   const high = highQ();
   H = buildScene(scene, map, W, U, { ground: high ? 2048 : 1024, aniso: Math.min(8, renderer.capabilities.getMaxAnisotropy()), wet: high, cones: true });
   fx = new Fx(scene, { quality: high ? 'high' : 'low' });
-  dressing = buildDressing(scene, W, { hash2, U });
+  dressing = buildDressing(scene, W, { hash2, U, vocab: map.signs || null });
   miniBase = document.createElement('canvas'); miniBase.width = miniBase.height = 500; paintMini(miniBase, map, W);
   setMuted(!!save.muted); setMusicOn(save.music !== false);
   if (!PAINTS.some(p => p.id === save.paint)) save.paint = PAINTS[0].id;
