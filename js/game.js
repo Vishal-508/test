@@ -1,16 +1,16 @@
 // Chor Police: Jugnupur ki Raat. A night car chase: game rules, police AI, multiplayer sync, input, camera, HUD and the main loop.
 import * as THREE from '../vendor/three.module.min.js';
-import { CFG, matchSetup, rankFor, paintsUnlocked } from './config.js?v=4';
-import { buildWorld, hash2, LANE, N as GRID, CS } from './world.js?v=4';
-import { buildScene, paintMini, setSiteVisual, COLORS, LABELS, makeLabel } from './scene.js?v=4';
-import { makeVehicle, stepVehicle, makeDriver, drive, CAR } from './vehicle.js?v=4';
-import { makeCar, PAINTS } from './cars.js?v=4';
-import { Fx } from './fx.js?v=4';
-import { buildDressing } from './dressing.js?v=4';
-import { buildAmbient } from './ambient.js?v=4';
-import { makePost } from './postfx.js?v=4';
-import { initAudio, setMuted, isMuted, setMusicOn, isMusicOn, engine, skid, siren, heartbeat, rain, music, sfx } from './audio.js?v=4';
-import { HostNet, ClientNet, cleanCode } from './net.js?v=4';
+import { CFG, matchSetup, rankFor, paintsUnlocked, applyRules, TOWNS, townName, LEVEL_NAMES, roomSetup, NIGHT_KINDS, composeRound, pickNight, pickTwist } from './config.js?v=5';
+import { buildWorld, hash2, LANE, N as GRID, CS } from './world.js?v=5';
+import { buildScene, paintMini, setSiteVisual, COLORS, LABELS, makeLabel } from './scene.js?v=5';
+import { makeVehicle, stepVehicle, makeDriver, drive, CAR } from './vehicle.js?v=5';
+import { makeCar, PAINTS } from './cars.js?v=5';
+import { Fx } from './fx.js?v=5';
+import { buildDressing } from './dressing.js?v=5';
+import { buildAmbient } from './ambient.js?v=5';
+import { makePost } from './postfx.js?v=5';
+import { initAudio, setMuted, isMuted, setMusicOn, isMusicOn, engine, skid, siren, heartbeat, rain, music, sfx } from './audio.js?v=5';
+import { HostNet, ClientNet, cleanCode } from './net.js?v=5';
 
 const $ = id => document.getElementById(id);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -29,7 +29,7 @@ const HIDE = CFG.HIDE, BUST = CFG.BUST;
 // ------------------------------------------------------------------ saved progress
 const SAVE_KEY = 'jugnupur.save.v2';
 const save = (() => {
-  const d = { name: '', night: 1, total: 0, wins: 0, muted: false, music: true, paint: '', quality: 'auto', cam: 'auto', medals: {} };
+  const d = { name: '', night: 1, total: 0, wins: 0, muted: false, music: true, paint: '', quality: 'auto', cam: 'auto', town: '', medals: {} };
   try { const old = JSON.parse(localStorage.getItem('jugnupur.save.v1') || '{}'); if (old.name) d.name = old.name; } catch (e) { /* no older save */ }
   try { return Object.assign(d, JSON.parse(localStorage.getItem(SAVE_KEY) || '{}')); } catch (e) { return d; }
 })();
@@ -54,7 +54,7 @@ const hemi = new THREE.HemisphereLight(0x8d93ab, 0x4c4850, HEMI); scene.add(hemi
 const moon = new THREE.DirectionalLight(0xc6ceff, MOON); moon.position.set(-30, 40, 45); scene.add(moon);
 const headlamp = new THREE.SpotLight(0xfff1d0, 0, 13, 0.56, 0.85, 1.0); scene.add(headlamp); scene.add(headlamp.target);
 const sirenRed = new THREE.PointLight(0xff2a2a, 0, 9, 1.4), sirenBlue = new THREE.PointLight(0x2a5cff, 0, 9, 1.4); scene.add(sirenRed); scene.add(sirenBlue);
-const U = { uCut: { value: new THREE.Vector3(0.5, 0.5, -1) }, uRes: { value: new THREE.Vector2(1, 1) }, uTime: { value: 0 } };
+const U = { uCut: { value: new THREE.Vector3(0.5, 0.5, -1) }, uRes: { value: new THREE.Vector2(1, 1) }, uTime: { value: 0 }, uPower: { value: 1 } };
 const dyn = new THREE.Group(); scene.add(dyn);
 const post = makePost(renderer, scene, camera);
 
@@ -63,11 +63,13 @@ const arrow = new THREE.Mesh(new THREE.ShapeGeometry(arrowShape), new THREE.Mesh
 arrow.rotation.order = 'YXZ'; arrow.rotation.x = Math.PI / 2; arrow.position.y = 0.07; arrow.renderOrder = 15; arrow.visible = false; scene.add(arrow);
 
 let W = null, H = null, miniBase = null, fx = null, dressing = null, ambient = null;
+let town = null;   // everything that belongs to the town now loaded hangs off this, so another town can take its place
 
 // ------------------------------------------------------------------ state
 const S = {
   screen: 'loading', net: null, isHost: true, solo: true, myId: 'h', paused: false,
-  lobby: { code: '', players: [] }, night: 1,
+  closedSites: new Set(), closedHides: new Set(), openEsc: null, hot: null, hotShown: -1, hotAt: 1e9, trackNext: 0, dark: false,
+  lobby: { code: '', players: [], opts: { level: 3, town: '', surprises: true, autoLevel: true }, series: { rounds: 0, chor: 0, police: 0 } }, night: 1,
   players: new Map(), cops: [], sites: [], me: null, others: [],
   t: 0, banked: 0, target: 800, over: null, leverLock: 0, cfg: null, flags: {}, evOut: [], pings: [], searchLv: {}, searchFound: {}, openDoors: [],
   cam: { yaw: 0, dist: 7.6, pitch: 0.7, pull: 1, ahead: 0.7, ty: 0.3, orbit: 0, look: 0, lookT: 0, fov: 52, hide: 0, shake: 0, lastHide: null, pos: new THREE.Vector3(50, 19, 80), tgt: new THREE.Vector3(50, 0, 50) },
@@ -84,10 +86,10 @@ function setScreen(name) {
 }
 let toastTimer = 0;
 function toast(text) { const t = $('toast'); t.textContent = text; t.classList.add('on'); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('on'), 3400); }
-function feed(text, kind) {
+function feed(text, kind, ms) {
   const f = $('feed'), d = document.createElement('div'); d.textContent = text; if (kind) d.className = kind; f.appendChild(d);
   while (f.children.length > 3) f.removeChild(f.firstChild);
-  setTimeout(() => { if (d.parentNode) d.parentNode.removeChild(d); }, 5200);
+  setTimeout(() => { if (d.parentNode) d.parentNode.removeChild(d); }, ms || 5200);
 }
 let bannerTimer = 0;
 function banner(text, kind) { const b = $('banner'); b.textContent = text; b.className = 'on ' + (kind || ''); clearTimeout(bannerTimer); bannerTimer = setTimeout(() => { b.className = ''; }, 2200); }
@@ -121,15 +123,22 @@ function newPlayer(p) {
 function newCop(k, x, y, a) {
   const c = { id: k, v: makeVehicle('police', x, y, a || 0), drv: makeDriver(), rx: x, ry: y, ra: a || 0, st: 'count', path: null, goal: null, goalPt: null, target: null, lastSeen: null, sawT: -9, sawIn: null, sweep: [], pre: null, wait: 0, repath: 0, searchT: 0, found: null, hint: null, sirenOn: false, campT: 0, car: makeCar('police', {}) };
   c.proxy = { x, y, a: a || 0, vx: 0, vy: 0, P: CAR.police };
+  c.name = (S.copNames && S.copNames[k % S.copNames.length]) || 'a police jeep';
   dyn.add(c.car.g);
   return c;
 }
 function beginMatch(m) {
   clearDyn();
+  applyRules(m.cfg.rules);   // tonight's numbers (a longer round, loot worth more...): the same for every player
+  S.closedSites = new Set(Array.isArray(m.cfg.closedSites) ? m.cfg.closedSites : []);
+  S.closedHides = new Set(Array.isArray(m.cfg.closedHides) ? m.cfg.closedHides : []);
+  S.openEsc = Array.isArray(m.cfg.openEsc) && m.cfg.openEsc.length ? new Set(m.cfg.openEsc) : null;
+  S.hot = null; S.hotAt = m.cfg.hot ? 28 + Math.random() * 14 : 1e9; S.trackNext = CFG.COUNT + (m.cfg.tracker || 0); S.hotShown = -1;
   S.cfg = m.cfg; S.target = m.cfg.target; S.t = 0; S.banked = 0; S.over = null; S.leverLock = 0; S.pings = []; S.evOut = []; S.flags = {}; S.searchLv = {}; S.searchFound = {}; S.openDoors = [];
   m.players.forEach(p => S.players.set(p.id, newPlayer(p)));
   S.me = S.players.get(S.myId);
-  S.sites = W.sites.map(s => ({ robbed: false, lockUntil: s.tier === 3 ? CFG.JACKPOT_AT : 0, prog: 0, alarmAt: -99, sirened: false, st: (s.tier === 3 || s.coach) ? 1 : 0, pct: 0 }));
+  S.sites = W.sites.map((s, i) => ({ robbed: S.closedSites.has(i), val: CFG.VALUE[s.tier], lockUntil: s.tier === 3 ? CFG.JACKPOT_AT : 0, prog: 0, alarmAt: -99, sirened: false, st: (s.tier === 3 || s.coach) ? 1 : 0, pct: 0 }));
+  S.copNames = shuffled((TOWNS.find(t => t.id === MAP_ID) || TOWNS[0]).officers);
   if (S.isHost) for (let k = 0; k < m.cfg.cops; k++) { const sp = W.policeSpawns[(k + (m.cfg.copStart || 0)) % W.policeSpawns.length]; S.cops.push(newCop(k, sp.x, sp.y, sp.a)); }
   const me = S.me;
   S.cam.yaw = Math.PI - me.v.a; S.cam.look = 0; S.cam.hide = 0; S.cam.shake = 0;
@@ -142,11 +151,19 @@ function beginMatch(m) {
   $('btnLights').textContent = me.role === 'chor' ? 'Lights' : 'Siren';
   $('wanted').style.display = me.role === 'chor' ? '' : 'none';
   $('infRow').style.display = m.cfg.informer ? '' : 'none';
-  fx.setRain(m.cfg.rain || 0);
+  fx.setRain(m.cfg.rain || 0); nightLook(m.cfg);
+  // name tags and markers for tonight: what each place is worth, which hand-off points are open, which hideouts are padlocked
+  W.sites.forEach((d, i) => H.relabelSite(i, `${d.name}  ${money(CFG.VALUE[d.tier])}`, false));
+  W.escapes.forEach((e, i) => { H.escVis[i].g.visible = escOpen(i); });
+  W.hides.forEach((h, i) => { const lb = H.hideVis[i].label; lb.material.color.setHex(S.closedHides.has(i) ? 0x9a6a6a : 0xffffff); });
   setScreen('play');
   lastHost = performance.now();
   if (m.cfg.name) banner(m.cfg.name, 'gold');
-  if (me.role === 'chor') { feed('Stop on a gold ring to rob it. Roll through a green beam to bank.', 'gold'); feed('Jeeps bust slow cars. Hide at a violet door when you have a lead.'); }
+  if (m.cfg.night || m.cfg.twist) { // a room with surprises: say what is different tonight
+    if (m.cfg.night) feed(m.cfg.night.name + ': ' + m.cfg.night.blurb, 'gold', 10000);   // these stay up longer: they are the rules of the round
+    if (m.cfg.twist) feed('Twist · ' + m.cfg.twist.name + ': ' + m.cfg.twist.blurb, 'gold', 10000);
+    feed((me.role === 'chor' ? 'Bank ' : 'Stop them banking ') + money(S.target) + ' in ' + mmss(CFG.ROUND) + '.' + (S.closedSites.size ? ' ' + [...S.closedSites].map(i => W.sites[i].name).join(' and ') + (S.closedSites.size > 1 ? ' are' : ' is') + ' shut tonight.' : ''), '', 10000);
+  } else if (me.role === 'chor') { feed('Stop on a gold ring to rob it. Roll through a green beam to bank.', 'gold'); feed('Jeeps bust slow cars. Hide at a violet door when you have a lead.'); }
   else { feed('Engines on. Stay beside a slow getaway car to bust it.'); feed('Follow alarms on your radar. Stop at a hideout door and hold SEARCH.'); }
   if (isTouch && innerHeight > innerWidth) toast('Turn your phone sideways for a wider view of the road.');
   try { if (navigator.wakeLock && navigator.wakeLock.request) navigator.wakeLock.request('screen').catch(() => {}); } catch (e) { /* screen may dim; harmless */ }
@@ -161,7 +178,11 @@ function siteState(i) {
 }
 const isJackpot = i => W.sites[i].tier === 3;
 function canCarry(P, i) { return isJackpot(i) ? P.carry.length === 0 : (P.carry.length < 2 && !P.carry.some(isJackpot)); }
-const carryValue = P => P.carry.reduce((s, i) => s + CFG.VALUE[W.sites[i].tier], 0);
+const carryValue = P => P.carry.reduce((s, i) => s + (S.sites[i] ? S.sites[i].val : CFG.VALUE[W.sites[i].tier]), 0);
+const escOpen = i => !S.openEsc || S.openEsc.has(i);            // tonight's hand-off points
+const openEscapes = () => W.escapes.filter(e => escOpen(e.i));
+const isHot = i => !!S.hot && S.hot.i === i;                     // the place paying double right now
+const worth = i => CFG.VALUE[W.sites[i].tier] * (isHot(i) ? 2 : 1);
 const chors = () => [...S.players.values()].filter(p => p.role === 'chor');
 const soloChor = () => chors().length <= 1;
 const loose = P => !P.jailed && P.hidden < 0;
@@ -186,9 +207,9 @@ function alarm(i, loud, n) {
   dispatch(d, n, true);
   ev({ t: loud ? 'alarm' : 'ping', m: loud ? 'SIREN at ' + d.full + '!' : 'Alarm bell at ' + d.full, x: d.x, y: d.y });
 }
-function arrest(ch, by) {
+function arrest(ch, by, who) {   // by: the police player who made the bust; who: the name of the officer when a computer jeep did
   if (ch.jailed || ch.immune > 0) return;
-  for (const i of ch.carry) { S.sites[i].robbed = false; S.sites[i].lockUntil = S.t + CFG.RELOCK; S.sites[i].prog = 0; S.sites[i].sirened = false; }
+  for (const i of ch.carry) { S.sites[i].robbed = false; S.sites[i].val = CFG.VALUE[W.sites[i].tier]; S.sites[i].lockUntil = S.t + CFG.RELOCK; S.sites[i].prog = 0; S.sites[i].sirened = false; }
   const lost = carryValue(ch);
   ch.carry = []; ch.hidden = -1; ch.hiding = -1; ch.exitFrom = -1; ch.bust = 0; ch.heat = 1; ch.jailed = true; ch.arrests++; ch.bankT = 0; ch.leverT = 0;
   ch.jailLeft = soloChor() ? CFG.JAIL_SOLO : CFG.JAIL_MULTI;
@@ -197,7 +218,7 @@ function arrest(ch, by) {
   S.leverLock = S.t + CFG.LEVER_LOCK;
   for (const c of S.cops) if (c.target === ch.id) { c.st = 'patrol'; c.target = null; c.path = null; c.wait = 1.5; }
   if (by && by.role === 'police') by.arrests++;
-  ev({ t: 'arrest', m: ch.name + ' was busted by ' + (by ? by.name : 'a police jeep') + (lost ? '. ' + money(lost) + ' goes back.' : '.'), who: ch.id });
+  ev({ t: 'arrest', m: ch.name + ' was busted by ' + (by ? by.name : who || 'a police jeep') + (lost ? '. ' + money(lost) + ' goes back.' : '.'), who: ch.id });
   if (soloChor()) { if (ch.arrests >= CFG.MAX_ARRESTS_SOLO) endRound('police', 'Busted ' + CFG.MAX_ARRESTS_SOLO + ' times.'); }
   else if (chors().every(p => p.jailed)) endRound('police', 'Every getaway car is in the impound.');
 }
@@ -211,7 +232,12 @@ function release(P, how) {
 }
 function endRound(w, why) {
   if (S.over) return;
-  S.over = { w, why, t: Math.round(S.t), b: S.banked, tg: S.target, pl: [...S.players.values()].map(p => ({ id: p.id, n: p.name, r: p.role, own: p.own, ar: p.arrests })) };
+  let lv = 0, nx = 0;
+  if (!S.solo && S.isHost) { // a room keeps score from round to round, and the level climbs when the chors win
+    const L = S.lobby; L.series.rounds++; L.series[w === 'chor' ? 'chor' : 'police']++;
+    lv = L.opts.level; if (L.opts.autoLevel && w === 'chor') L.opts.level = Math.min(10, L.opts.level + 1); nx = L.opts.level;
+  }
+  S.over = { w, why, lv, nx, sr: (!S.solo && S.isHost) ? S.lobby.series : null, t: Math.round(S.t), b: S.banked, tg: S.target, pl: [...S.players.values()].map(p => ({ id: p.id, n: p.name, r: p.role, own: p.own, ar: p.arrests })) };
   if (S.net && !S.solo) S.net.broadcast(snapshot(false));
   finishMatch(S.over);
 }
@@ -221,7 +247,7 @@ function doAction(P, type, i) {
   const slack = P.isMe ? 0.3 : 1.4, v = P.v; // remote players are judged on slightly older positions
   if (P.role === 'chor') {
     if (type === 'hide') { // asking to be let into a hideout from the lane outside its door
-      const h = hideOf(i); if (!h || P.hidden >= 0 || P.hiding >= 0 || dist(v, h.front) > HIDE.RANGE + slack || Math.abs(v.vf) > HIDE.SPEED + 0.8) return;
+      const h = hideOf(i); if (!h || S.closedHides.has(i) || P.hidden >= 0 || P.hiding >= 0 || dist(v, h.front) > HIDE.RANGE + slack || Math.abs(v.vf) > HIDE.SPEED + 0.8) return;
       if ([...S.players.values()].some(o => o !== P && (o.hidden === i || o.hiding === i))) return;
       P.hiding = i; P.hideAt = S.t + (h.grove ? HIDE.IN_GROVE : HIDE.IN); P.seenIn = false; P.bankT = 0;
       for (const c of S.cops) if (c.sawIn && c.sawIn.id === P.id) c.sawIn = null;   // earlier sightings are forgotten; a jeep watching this entry notes it again
@@ -237,7 +263,7 @@ function doAction(P, type, i) {
 }
 function removePlayer(id) {
   const P = S.players.get(id); if (!P) return;
-  for (const i of P.carry) { S.sites[i].robbed = false; S.sites[i].prog = 0; }
+  for (const i of P.carry) { S.sites[i].robbed = false; S.sites[i].val = CFG.VALUE[W.sites[i].tier]; S.sites[i].prog = 0; }
   dropEntity(P); S.players.delete(id);
   ev({ t: 'left', m: P.name + ' left the game.', who: id });
   if (S.isHost && !S.over && S.screen === 'play') {
@@ -245,7 +271,7 @@ function removePlayer(id) {
     if (!all.length) endRound('police', 'No getaway cars left in town.');
     else if (all.length > 1 && all.every(p => p.jailed)) endRound('police', 'Every getaway car is in the impound.');
     else if (P.role === 'police') { // a police player left: computer jeeps take over so the chors still have someone to dodge
-      const humans = [...S.players.values()].filter(p => p.role === 'police').length, want = matchSetup(all.length, humans, 1).cops;
+      const humans = [...S.players.values()].filter(p => p.role === 'police').length, want = roomSetup(all.length, humans, (S.cfg && S.cfg.level) || 3).cops;
       while (S.cops.length < want) { const sp = W.policeSpawns[S.cops.length % W.policeSpawns.length]; const c = newCop(S.cops.length, sp.x, sp.y, sp.a); c.st = 'patrol'; S.cops.push(c); }
     }
   }
@@ -254,12 +280,12 @@ function removePlayer(id) {
 // ------------------------------------------------------------------ host: police jeeps driven by the computer
 function copGo(c, x, y) { c.path = W.findPath(c.v.x, c.v.y, x, y) || null; c.drv.seg = 0; c.goalPt = { x, y }; }
 let hostOthers = [];
-const copEnv = { solid: null, others: null, speedMul: 1 };
+const copEnv = { solid: null, others: null, speedMul: 1, gripMul: 1 };
 function copDrive(c, want, dt) { // returns true on arrival
   if (!c.path || c.path.length < 2) { copStop(c, dt); return true; }
   const inp = drive(c.v, c.path, c.drv, want, dt), arrived = inp.arrived;
   if (inp.wedged && c.goalPt) { const g = c.goalPt; c.path = W.findPath(c.v.x, c.v.y, g.x, g.y) || c.path; c.drv.seg = 0; }
-  copEnv.solid = W.solidPolice; copEnv.others = hostOthers;
+  copEnv.solid = W.solidPolice; copEnv.others = hostOthers; copEnv.speedMul = S.cfg.carMul || 1; copEnv.gripMul = S.cfg.gripMul || 1;
   stepVehicle(c.v, inp, dt, copEnv);
   return arrived;
 }
@@ -278,16 +304,16 @@ function copSees(c, ch) {
   return W.los(c.v.x, c.v.y, p.x, p.y);
 }
 function doorsNear(p, n) { // the hideout doors a jeep would check, nearest first
-  return W.hides.map(h => ({ i: h.i, d: dist(h.front, p) })).filter(o => o.d < HIDE.DOORS).sort((a, b) => a.d - b.d).slice(0, n).map(o => o.i);
+  return W.hides.filter(h => !S.closedHides.has(h.i)).map(h => ({ i: h.i, d: dist(h.front, p) })).filter(o => o.d < HIDE.DOORS).sort((a, b) => a.d - b.d).slice(0, n).map(o => o.i);
 }
 function pickPatrol(c) {
   if (c.hint) { // after an alarm: go and look at the way out a chor would most likely run for
     const h = c.hint; c.hint = null;
-    if (Math.random() < 0.7) return W.escapes.reduce((b, e) => (!b || dist(e, h) < dist(b, h)) ? e : b, null);
+    if (Math.random() < 0.7) return openEscapes().reduce((b, e) => (!b || dist(e, h) < dist(b, h)) ? e : b, null);
   }
   const cand = [];
   W.sites.forEach((s, i) => { if (!S.sites[i].robbed) cand.push({ x: s.x, y: s.y, w: [0, 1, 2, 4][s.tier] }); });
-  W.escapes.forEach(e => cand.push({ x: e.x, y: e.y, w: 2 }));
+  openEscapes().forEach(e => cand.push({ x: e.x, y: e.y, w: 2 }));
   W.posts.forEach(p => cand.push({ x: p.x, y: p.y, w: 1.5 }));
   let total = 0;
   for (const k of cand) {
@@ -306,7 +332,7 @@ function copTick(c, dt) {
   const v = c.v;
   if (S.t < CFG.COUNT) { c.st = 'count'; c.sirenOn = false; return; }
   if (c.st === 'count') { c.st = 'patrol'; c.wait = 0.5 * c.id; }
-  const sp = S.cfg.speedMul;
+  const sp = S.cfg.speedMul * (S.cfg.carMul || 1);
   let seen = null, sd = 1e9;
   for (const ch of chors()) {
     if (!copSees(c, ch)) continue;
@@ -362,7 +388,7 @@ function copTick(c, dt) {
       if (was < HIDE.TOUCH && c.searchT >= HIDE.TOUCH && occ && (occ.blown || occ.engHot > 0 || (c.sawIn && c.sawIn.id === occ.id && c.sawIn.i === h.i))) c.found = occ.id;
       if (c.found) S.searchFound[h.i] = 1;
       if (c.searchT >= HIDE.SEARCH) {
-        if (occ && c.found === occ.id) { occ.immune = 0; arrest(occ, null); }
+        if (occ && c.found === occ.id) { occ.immune = 0; arrest(occ, null, c.name); }
         else if (occ) { ev({ t: 'safe', to: occ.id }); addHeat(occ, -1); }
         c.searchT = 0; c.found = null; c.sweep.shift(); c.path = null; c.sweepT = 0; delete S.searchLv[h.i]; delete S.searchFound[h.i];
       }
@@ -378,12 +404,27 @@ function hostTick(dt) {
   if (S.over) return;
   S.t += dt;
   const F = S.flags;
-  if (!F.go && S.t >= CFG.COUNT) { F.go = 1; ev({ t: 'go', m: 'The police are rolling. Drive!' }); }
+  if (!F.go && S.t >= CFG.COUNT) { F.go = 1; ev({ t: 'go', m: 'The police are rolling. Drive!', b: (S.cfg.night || S.cfg.twist) ? 1 : 0 }); }
   if (!F.jack && S.t >= CFG.JACKPOT_AT) { F.jack = 1; ev({ t: 'chime', m: 'The clock tower chimes. The three tijoris are open!' }); }
   if (!F.co && S.t >= CFG.COACH_OPEN) { F.co = 1; if (W.sites.some(s => s.coach)) ev({ t: 'chime', m: W.sites.find(q => q.coach).full + ' is open for 45 seconds!' }); }
   if (!F.cc && S.t >= CFG.COACH_CLOSE) { F.cc = 1; const ci = W.sites.findIndex(s => s.coach); if (ci >= 0 && !S.sites[ci].robbed) ev({ t: 'info', m: W.sites[ci].full + ' is shut again.' }); }
   if (!F.min && S.t >= CFG.ROUND - 45) { F.min = 1; ev({ t: 'info', m: '45 seconds left!' }); }
   const all = [...S.players.values()], pol = all.filter(P => P.role === 'police'), started = S.t >= CFG.COUNT;
+  // now and then one small place pays double for a short while: everybody is told, chors and police alike
+  if (S.cfg.hot) {
+    if (S.hot && (S.t >= S.hot.until || S.sites[S.hot.i].robbed)) { S.hot = null; S.hotAt = S.t + 28 + Math.random() * 22; }
+    if (!S.hot && S.t >= S.hotAt && S.t < CFG.ROUND - 32) {
+      const pool = []; W.sites.forEach((d, i) => { if (!S.sites[i].robbed && !d.coach && d.tier < 3 && S.t >= S.sites[i].lockUntil) pool.push(i); });
+      if (pool.length) { const i = pool[Math.floor(Math.random() * pool.length)], d = W.sites[i]; S.hot = { i, until: S.t + 26 }; ev({ t: 'hot', i, m: 'Hot tip: ' + d.full + ' pays double for the next 25 seconds!', x: d.x, y: d.y }); }
+      else S.hotAt = S.t + 12;
+    }
+  }
+  // a night when the police radio keeps giving the getaway cars away
+  if (S.cfg.tracker && S.t >= S.trackNext) {
+    S.trackNext = S.t + S.cfg.tracker;
+    const pts = all.filter(P => P.role === 'chor' && loose(P)).map(P => [r2(P.v.x), r2(P.v.y)]);
+    if (pts.length) { ev({ t: 'track', pts }); for (const q of pts) dispatch({ x: q[0], y: q[1] }, 1, false); }
+  }
   hostOthers = [];
   for (const P of all) {
     if (P.immune > 0) P.immune -= dt;
@@ -421,8 +462,9 @@ function hostTick(dt) {
       s.prog += dt * Math.pow(hs.length, 0.9);
       if (d.tier === 3 && !s.sirened && s.prog >= CFG.HOLD[3] * CFG.SIREN_AT) { s.sirened = true; hs.forEach(P => addHeat(P, 1)); alarm(i, true, 2 + Math.ceil(hs[0].heat)); }
       if (s.prog >= CFG.HOLD[d.tier]) {
-        s.robbed = true; s.prog = 0; s.st = 2; hs[0].carry.push(i); hs.forEach(P => addHeat(P, [0, 0.5, 1, 1][d.tier]));
-        ev({ t: 'grab', m: hs[0].name + ' robbed ' + d.full + ' (' + money(CFG.VALUE[d.tier]) + ').', who: hs[0].id });
+        s.val = worth(i); s.robbed = true; s.prog = 0; s.st = 2; hs[0].carry.push(i); hs.forEach(P => addHeat(P, [0, 0.5, 1, 1][d.tier]));
+        ev({ t: 'grab', m: hs[0].name + ' robbed ' + d.full + ' (' + money(s.val) + (isHot(i) ? ', double!' : '') + ').', who: hs[0].id });
+        if (isHot(i)) { S.hot = null; S.hotAt = S.t + 28 + Math.random() * 22; }
         if (d.tier !== 3) alarm(i, false, 1);
       }
     } else if (s.prog > 0) { s.prog = Math.max(0, s.prog - dt * 2.5); if (s.prog === 0) s.sirened = false; }
@@ -431,7 +473,7 @@ function hostTick(dt) {
   const policeCars = [];
   for (const c of S.cops) if (c.st !== 'count') policeCars.push(c);
   if (started) for (const p of pol) policeCars.push(p);
-  for (const pc of policeCars) { const near = W.escapes.some(e => dist(pc.v, e) < 3); pc.campT = near && Math.abs(pc.v.vf) < 0.3 ? (pc.campT || 0) + dt : 0; }
+  for (const pc of policeCars) { const near = openEscapes().some(e => dist(pc.v, e) < 3); pc.campT = near && Math.abs(pc.v.vf) < 0.3 ? (pc.campT || 0) + dt : 0; }
 
   for (const ch of all) {
     if (ch.role !== 'chor') continue;
@@ -440,7 +482,7 @@ function hostTick(dt) {
     // roll-to-bank: slow down inside a green beam with no police on top of you
     ch.bankBlocked = false; let banking = false;
     if (free && ch.carry.length) for (const e of W.escapes) {
-      if (dist(v, e) > CFG.BANK_RANGE || sp > CFG.BANK_SPEED + (ch.isMe ? 0 : 0.3)) continue;
+      if (!escOpen(e.i) || dist(v, e) > CFG.BANK_RANGE || sp > CFG.BANK_SPEED + (ch.isMe ? 0 : 0.3)) continue;
       if (policeCars.some(pc => (pc.campT || 0) < CFG.CAMP && dist(pc.v, v) < CFG.BANK_CLEAR && W.los(pc.v.x, pc.v.y, v.x, v.y))) { ch.bankBlocked = true; break; }
       banking = true; ch.bankT += dt;
       if (ch.bankT >= CFG.BANK_HOLD) {
@@ -477,15 +519,15 @@ function hostTick(dt) {
     // the bust meter: a police vehicle staying close to a slow car fills it
     if (!loose(ch) || ch.immune > 0) { ch.bust = 0; continue; }
     const p = spot(ch), spd = ch.hiding >= 0 ? 1.0 : sp;
-    let n = 0, by = null, far = false;
+    let n = 0, by = null, who = '', far = false;
     for (const pc of policeCars) {
       const d = dist(pc.v, p);
-      if (d < BUST.RANGE && W.los(pc.v.x, pc.v.y, p.x, p.y)) { n++; if (pc.role === 'police') by = by || pc; }
+      if (d < BUST.RANGE && W.los(pc.v.x, pc.v.y, p.x, p.y)) { n++; if (pc.role === 'police') by = by || pc; else who = who || pc.name; }
       else if (inGali && d < BUST.GALI_RANGE && spd < BUST.VSTOP && W.los(pc.v.x, pc.v.y, p.x, p.y)) far = true;
     }
     const slow = clamp((BUST.VSAFE - spd) / (BUST.VSAFE - BUST.VSTOP), 0, 1);
     let rate = n ? BUST.RATE * (S.cfg.bustMul || 1) * slow * (1 + BUST.EXTRA * (n - 1)) * (ch.crashT > 0 ? 0.5 : 1) : far ? BUST.GALI : 0;
-    if (rate > 0) { ch.bust = Math.min(1, ch.bust + rate * dt); if (ch.bust >= 1) { arrest(ch, by); if (S.over) return; } }
+    if (rate > 0) { ch.bust = Math.min(1, ch.bust + rate * dt); if (ch.bust >= 1) { arrest(ch, by, who); if (S.over) return; } }
     else ch.bust = Math.max(0, ch.bust - BUST.DRAIN * dt);
   }
   S.searchLv = {}; S.searchFound = {};   // rebuilt every tick by whoever is searching right now
@@ -515,7 +557,8 @@ const ST_CODE = { patrol: 0, respond: 1, chase: 2, search: 3, count: 4 }, ST_NAM
 function snapshot(forPolice) {
   const m = {
     k: 's', t: r2(S.t), b: S.banked, ll: r2(Math.max(0, S.leverLock - S.t)),
-    s: S.sites.map((s, i) => [s.st, Math.round(100 * s.prog / CFG.HOLD[W.sites[i].tier])]),
+    s: S.sites.map((s, i) => [s.st, Math.round(100 * s.prog / CFG.HOLD[W.sites[i].tier]), s.val]),
+    h: S.hot ? [S.hot.i, Math.max(0, Math.ceil(S.hot.until - S.t))] : 0,
     p: [...S.players.values()].map(P => {
       const blank = forPolice && P.role === 'chor' && P.hidden >= 0;   // police clients are never told where a hidden car is
       return [P.id, blank ? 0 : r2(P.v.x), blank ? 0 : r2(P.v.y), r2(P.v.a),
@@ -534,7 +577,8 @@ function applySnapshot(m) {
   if (S.screen !== 'play') return;
   const now = performance.now();
   S.t = m.t; S.banked = m.b; S.leverLock = m.t + m.ll;
-  m.s.forEach((v, i) => { if (S.sites[i]) { S.sites[i].st = v[0]; S.sites[i].pct = v[1]; S.sites[i].robbed = v[0] === 2; } });
+  m.s.forEach((v, i) => { if (S.sites[i]) { S.sites[i].st = v[0]; S.sites[i].pct = v[1]; S.sites[i].robbed = v[0] === 2; if (v[2] > 0) S.sites[i].val = v[2]; } });
+  S.hot = Array.isArray(m.h) && W.sites[m.h[0]] ? { i: m.h[0] | 0, until: m.t + (+m.h[1] || 0) } : null;
   for (const v of m.p) {
     const P = S.players.get(v[0]); if (!P) continue;
     if (!P.isMe) { const n = P.net; n.x = v[1]; n.y = v[2]; n.a = v[3]; n.vf = v[10]; n.steer = v[11]; n.t = now - Math.min(250, v[20] || 0); P.nitroOn = !!(v[4] & 4); P.lights = !!(v[4] & 8); P.brake = !!(v[4] & 16); P.drift = !!(v[4] & 32); }
@@ -565,7 +609,12 @@ function handleEvent(e) {
     case 'free': feed(e.m, 'good'); sfx.free(); if (mine) banner('AZAAD!', 'green'); break;
     case 'safe': banner('BACH GAYE! They found nothing.', 'green'); sfx.free(); me.nitro = Math.min(1, me.nitro + CFG.NITRO.NEAR_MISS * 2); break;
     case 'chime': banner(e.m, 'gold'); feed(e.m, 'gold'); sfx.chime(); break;
-    case 'go': feed(e.m); if (me.role === 'chor') sfx.radio(); break;
+    case 'hot': ping(e.x, e.y, 12, '#ffe27a'); feed(e.m, 'gold'); sfx.chime(); if (me.role === 'police') mark(); else banner('HOT TARGET · DOUBLE', 'gold'); break;
+    case 'track':
+      if (me.role === 'police') { for (const q of (e.pts || [])) ping(+q[0] || 0, +q[1] || 0, 6, '#ff4a4a'); feed('Radio: getaway cars located. Check your radar.', 'alarm'); sfx.radio(); }
+      else if (loose(me)) { feed('The police radio just gave your position away!', 'alarm'); sfx.bell(); }
+      break;
+    case 'go': if (e.b) banner(me.role === 'chor' ? 'POLICE ROLLING!' : 'GO!', 'red'); else feed(e.m); if (me.role === 'chor') sfx.radio(); break;
     case 'spot': banner('DEKH LIYA! BHAAG!', 'red'); sfx.spotted(); break;
     case 'left': { feed(e.m); const P = S.players.get(e.who); if (P && !S.isHost) { dropEntity(P); S.players.delete(e.who); } break; }
     default: if (e.m) feed(e.m);
@@ -583,7 +632,7 @@ function findContext(me) {
   if (me.role === 'chor') {
     if (me.hidden >= 0) return null;
     if (me.carry.length) for (const e of W.escapes) {
-      const d = dist(v, e); if (d > CFG.BANK_RANGE) continue;
+      const d = dist(v, e); if (!escOpen(e.i) || d > CFG.BANK_RANGE) continue;
       const frac = S.isHost ? me.bankT / CFG.BANK_HOLD : me.bankPct / 100;
       out.push({ s: -1, type: 'auto', brake: true, frac: sp > CFG.BANK_SPEED || me.bankBlocked ? 0 : frac, label: me.bankBlocked ? 'Police too close to hand over!' : sp > CFG.BANK_SPEED ? 'Slow down to hand over ' + money(carryValue(me)) : 'Handing over ' + money(carryValue(me)) + '…' });
     }
@@ -593,7 +642,7 @@ function findContext(me) {
       if (st === 2) return;
       if (st === 1) out.push({ s: d / CFG.ROB_RANGE + 0.2, type: 'none', label: s.coach ? (S.t < CFG.COACH_OPEN ? 'Strongbox opens at ' + mmss(CFG.ROUND - CFG.COACH_OPEN) + ' on the clock' : 'Strongbox is shut') : (S.t < CFG.JACKPOT_AT ? 'Locked until the clock tower chimes' : 'Locked again for a moment') });
       else if (!canCarry(me, i)) out.push({ s: d / CFG.ROB_RANGE + 0.2, type: 'none', label: 'The boot is full. Hand it over first.' });
-      else out.push({ s: d / CFG.ROB_RANGE - 0.4, type: 'auto', brake: true, frac: S.isHost ? S.sites[i].prog / CFG.HOLD[s.tier] : S.sites[i].pct / 100, label: sp > CFG.ROB_SPEED ? 'Stop here to rob ' + s.full : 'Robbing ' + s.full + '  ' + money(CFG.VALUE[s.tier]) + (s.tier === 3 && !(S.sites[i].prog >= CFG.HOLD[3] * CFG.SIREN_AT || S.sites[i].pct >= CFG.SIREN_AT * 100) ? '  (siren soon)' : '') });
+      else out.push({ s: d / CFG.ROB_RANGE - 0.4, type: 'auto', brake: true, frac: S.isHost ? S.sites[i].prog / CFG.HOLD[s.tier] : S.sites[i].pct / 100, label: sp > CFG.ROB_SPEED ? 'Stop here to rob ' + s.full + (isHot(i) ? ' · DOUBLE' : '') : 'Robbing ' + s.full + '  ' + money(worth(i)) + (s.tier === 3 && !(S.sites[i].prog >= CFG.HOLD[3] * CFG.SIREN_AT || S.sites[i].pct >= CFG.SIREN_AT * 100) ? '  (siren soon)' : '') });
     });
     if (chors().some(p => p.jailed && p !== me)) for (const l of W.levers) {
       const d = dist(v, l); if (d > CFG.LEVER_RANGE) continue;
@@ -602,7 +651,8 @@ function findContext(me) {
     }
     if (me.hiding < 0) for (const h of W.hides) {
       const d = dist(v, h.front); if (d > HIDE.RANGE) continue;
-      if ([...S.players.values()].some(o => o !== me && (o.hidden === h.i || o.hiding === h.i))) out.push({ s: d / HIDE.RANGE + 0.3, type: 'none', label: 'Someone is already in ' + h.name });
+      if (S.closedHides.has(h.i)) out.push({ s: d / HIDE.RANGE + 0.4, type: 'none', label: h.name + ' is padlocked tonight' });
+      else if ([...S.players.values()].some(o => o !== me && (o.hidden === h.i || o.hiding === h.i))) out.push({ s: d / HIDE.RANGE + 0.3, type: 'none', label: 'Someone is already in ' + h.name });
       else if (sp > HIDE.SPEED) out.push({ s: d / HIDE.RANGE + 0.05, type: 'none', label: 'Slow down to hide in ' + h.name });
       else out.push({ s: d / HIDE.RANGE + 0.05, type: 'hide', i: h.i, key: 'hide' + h.i, hold: 0.12, act: true, label: (isTouch ? 'HIDE: ' : 'Press E: hide in ') + h.name });
     }
@@ -675,7 +725,7 @@ function readInput(me, dt, assist) {
   inp.handbrake = k.has('Space') || In.brakeTouch; inp.nitro = k.has('ShiftLeft') || k.has('ShiftRight') || In.nitroTouch;
   return inp;
 }
-const myEnv = { solid: null, others: null, speedMul: 1 };
+const myEnv = { solid: null, others: null, speedMul: 1, gripMul: 1 };
 function drivePhysics(me, dt) {
   const v = me.v;
   me.nitroOn = false;
@@ -689,7 +739,7 @@ function drivePhysics(me, dt) {
   me.nitroOn = wantNitro; me.nitroWas = wantNitro; inp.nitro = wantNitro;
   let mul = 1;
   for (const c of me.carry) mul -= isJackpot(c) ? CFG.CARRY_SLOW_JACKPOT : CFG.CARRY_SLOW;
-  myEnv.solid = me.role === 'chor' ? W.solidChor : W.solidPolice; myEnv.others = S.others; myEnv.speedMul = mul;
+  myEnv.solid = me.role === 'chor' ? W.solidChor : W.solidPolice; myEnv.others = S.others; myEnv.speedMul = mul * (S.cfg.carMul || 1); myEnv.gripMul = S.cfg.gripMul || 1;
   stepVehicle(v, inp, dt, myEnv);
   if (v.boost > 0) { me.nitro = Math.min(1, me.nitro + v.boost); S.boostMsg = v.boost >= 0.2 ? 'DRIFT! +nitro' : ''; }
   const fxs = Math.sin(v.a), fys = Math.cos(v.a);
@@ -826,7 +876,7 @@ function updateLights(dt, time) {
     sirenRed.position.set(best.x, 0.8, best.y); sirenBlue.position.set(best.x, 0.8, best.y);
     sirenRed.intensity = ph ? 16 : 0; sirenBlue.intensity = ph ? 0 : 16;
   } else { sirenRed.intensity = 0; sirenBlue.intensity = 0; }
-  hemi.intensity = HEMI + fx.flash * 3.2; moon.intensity = MOON + fx.flash * 2.6;
+  hemi.intensity = HEMI * LIGHT_MUL + fx.flash * 3.2; moon.intensity = MOON * LIGHT_MUL + fx.flash * 2.6;
   if (post.enabled) post.uniforms.uFlash.value = fx.flash * 0.16;
 }
 // Two ways to follow the car: 'high' looks down over the rooftops, 'street' sits low behind the boot.
@@ -890,7 +940,7 @@ function updateCamera(dt, time) {
 }
 function updateLabels() {
   const street = camMode() === 'street' && (S.screen === 'play' || S.screen === 'over');
-  if (H.cones) H.cones.visible = !street;
+  if (H.cones) H.cones.visible = !street && !S.dark;
   if (hudCache.street !== street) { hudCache.street = street; document.body.classList.toggle('streetcam', street); }   // from below, the lamps' cones of light would fill the screen
   for (const sp of LABELS) {
     if (!sp.visible) continue;
@@ -906,8 +956,17 @@ function updateWorldVisuals(time) {
     const vz = H.siteVis[i]; setSiteVisual(vz, S.sites[i].st);
     // beams fade when the camera is right beside them, so they never fill the screen
     const near = clamp((Math.hypot(camera.position.x - W.sites[i].x, camera.position.z - W.sites[i].y) - 3.5) / 5, 0.12, 1);
-    vz.beam.material.opacity = (S.sites[i].st === 0 ? 0.17 + 0.07 * Math.sin(time * 3 + i) : 0.09) * near;
-    vz.gem.rotation.y = time * 1.6 + i; vz.gem.position.y = 0.95 + Math.sin(time * 2.2 + i) * 0.08;
+    const hot = isHot(i) && S.sites[i].st === 0;
+    vz.beam.material.opacity = (S.sites[i].st === 0 ? (hot ? 0.34 + 0.16 * Math.sin(time * 9) : 0.17 + 0.07 * Math.sin(time * 3 + i)) : 0.09) * near;
+    vz.gem.rotation.y = time * (hot ? 5 : 1.6) + i; vz.gem.position.y = 0.95 + Math.sin(time * 2.2 + i) * 0.08;
+    vz.gem.scale.setScalar(vz.sc * (hot ? 1.7 + 0.25 * Math.sin(time * 9) : 1));
+  }
+  // the hot target wears a new name tag while it lasts
+  const hotNow = S.hot && S.sites[S.hot.i] && S.sites[S.hot.i].st === 0 ? S.hot.i : -1;
+  if (hotNow !== S.hotShown) {
+    if (S.hotShown >= 0 && W.sites[S.hotShown]) H.relabelSite(S.hotShown, `${W.sites[S.hotShown].name}  ${money(CFG.VALUE[W.sites[S.hotShown].tier])}`, false);
+    if (hotNow >= 0) H.relabelSite(hotNow, `${W.sites[hotNow].name}  ${money(worth(hotNow))}  ×2`, true);
+    S.hotShown = hotNow;
   }
   for (let i = 0; i < W.escapes.length; i++) H.escVis[i].beam.material.opacity = 0.2 * clamp((Math.hypot(camera.position.x - W.escapes[i].x, camera.position.z - W.escapes[i].y) - 3.5) / 5, 0.12, 1);
   const locked = S.t < S.leverLock;
@@ -917,7 +976,8 @@ function updateWorldVisuals(time) {
   const me = S.me; let tgt = null, col = COLORS.loot;
   if (me && S.screen === 'play' && loose(me) && !me.scr) {
     if (me.role === 'chor') {
-      if (me.carry.length) { col = COLORS.escape; tgt = W.escapes.reduce((b, e) => (!b || dist(me.v, e) < dist(me.v, b)) ? e : b, null); }
+      if (me.carry.length) { col = COLORS.escape; tgt = openEscapes().reduce((b, e) => (!b || dist(me.v, e) < dist(me.v, b)) ? e : b, null); }
+      else if (S.hot && S.sites[S.hot.i].st === 0) tgt = W.sites[S.hot.i];
       else { let bd = 1e9; W.sites.forEach((s, i) => { if (S.sites[i].st === 0) { const d = dist(me.v, s); if (d < bd) { bd = d; tgt = s; } } }); }
     } else if (S.lastAlarm && performance.now() - S.lastAlarm.t < 16000) { tgt = S.lastAlarm; col = COLORS.alarm; }
   }
@@ -940,6 +1000,7 @@ function updateHud(dt, time) {
   else if (S.t < CFG.JACKPOT_AT) phase = 'Tijoris open in ' + Math.ceil(CFG.JACKPOT_AT - S.t) + 's';
   else if (S.t >= CFG.COACH_OPEN && S.t < CFG.COACH_CLOSE) phase = 'Strongbox open ' + Math.ceil(CFG.COACH_CLOSE - S.t) + 's';
   else if (left < 0) phase = 'Aakhri daud';
+  if (S.hot && S.sites[S.hot.i] && S.sites[S.hot.i].st === 0 && S.t >= CFG.COUNT) phase = 'Hot target: ' + W.sites[S.hot.i].name + ' ×2 · ' + Math.max(0, Math.ceil(S.hot.until - S.t)) + 's';
   setText('phase', phase);
   setText('lootText', money(S.banked) + ' / ' + money(S.target)); setBar('lootBar', S.banked / S.target);
   // danger: who is on me, how close; drives the red edges, the siren and the music
@@ -1021,9 +1082,10 @@ function drawMini() {
   }
   c.drawImage(miniBase, 0, 0, 100 * Z, 100 * Z);
   const dot = (x, y, r, col) => { c.beginPath(); c.arc(x * Z, y * Z, r, 0, TAU); c.fillStyle = col; c.fill(); };
-  for (const h of W.hides) { c.fillStyle = '#b49cff'; c.fillRect(h.mouth.x * Z - 3, h.mouth.y * Z - 3, 6, 6); }
+  for (const h of W.hides) { if (S.closedHides && S.closedHides.has(h.i)) continue; c.fillStyle = '#b49cff'; c.fillRect(h.mouth.x * Z - 3, h.mouth.y * Z - 3, 6, 6); }
   W.sites.forEach((s, i) => { const st = S.sites[i] ? S.sites[i].st : 0; if (st === 2) return; dot(s.x, s.y, 3 + s.tier * 1.3, st === 1 ? '#8a6a4a' : '#f3b43f'); if (s.tier === 3) { c.beginPath(); c.arc(s.x * Z, s.y * Z, 9, 0, TAU); c.strokeStyle = st === 1 ? '#8a6a4a' : '#f3b43f'; c.lineWidth = 1.6; c.stroke(); } });
-  for (const e of W.escapes) { c.beginPath(); c.moveTo(e.x * Z, e.y * Z - 8); c.lineTo(e.x * Z + 7.5, e.y * Z + 6); c.lineTo(e.x * Z - 7.5, e.y * Z + 6); c.closePath(); c.fillStyle = '#3bc98b'; c.fill(); }
+  if (S.hot && S.sites[S.hot.i] && S.sites[S.hot.i].st === 0) { const hs = W.sites[S.hot.i], f = (now % 700) / 700; c.beginPath(); c.arc(hs.x * Z, hs.y * Z, 8 + f * 14, 0, TAU); c.strokeStyle = '#ffe27a'; c.globalAlpha = 1 - f; c.lineWidth = 3; c.stroke(); c.globalAlpha = 1; }
+  for (const e of W.escapes) { if (!escOpen(e.i)) continue; c.beginPath(); c.moveTo(e.x * Z, e.y * Z - 8); c.lineTo(e.x * Z + 7.5, e.y * Z + 6); c.lineTo(e.x * Z - 7.5, e.y * Z + 6); c.closePath(); c.fillStyle = '#3bc98b'; c.fill(); }
   const anyJailed = chors().some(p => p.jailed);
   for (const l of W.levers) { c.beginPath(); c.arc(l.x * Z, l.y * Z, anyJailed ? 5 + 2 * Math.sin(now / 150) : 3, 0, TAU); c.strokeStyle = '#6a98ff'; c.lineWidth = 2; c.stroke(); }
   S.pings = S.pings.filter(p => now - p.t0 < p.dur);
@@ -1046,7 +1108,8 @@ function drawMini() {
       const a = Math.atan2(dy, dx) - S.cam.yaw, px = size / 2 + Math.cos(a) * (size / 2 - 9), py = size / 2 + Math.sin(a) * (size / 2 - 9);
       c.fillStyle = col; c.beginPath(); if (tri) { c.moveTo(px, py - 6); c.lineTo(px + 5.5, py + 4.5); c.lineTo(px - 5.5, py + 4.5); c.closePath(); } else c.arc(px, py, 5, 0, TAU); c.fill(); c.lineWidth = 1.5; c.strokeStyle = '#0a0f1c'; c.stroke();
     };
-    if (me.role === 'chor') { if (me.carry.length) for (const e of W.escapes) pin(e.x, e.y, '#3bc98b', true); else { let best = null, bd = 1e9; W.sites.forEach((s, i) => { if (S.sites[i].st === 0) { const d = dist(me.v, s); if (d < bd) { bd = d; best = s; } } }); if (best) pin(best.x, best.y, '#f3b43f', false); } }
+    if (S.hot && S.sites[S.hot.i] && S.sites[S.hot.i].st === 0) pin(W.sites[S.hot.i].x, W.sites[S.hot.i].y, '#ffe27a', false);
+    if (me.role === 'chor') { if (me.carry.length) for (const e of openEscapes()) pin(e.x, e.y, '#3bc98b', true); else { let best = null, bd = 1e9; W.sites.forEach((s, i) => { if (S.sites[i].st === 0) { const d = dist(me.v, s); if (d < bd) { bd = d; best = s; } } }); if (best) pin(best.x, best.y, '#f3b43f', false); } }
     else if (S.lastAlarm && now - S.lastAlarm.t < 16000) pin(S.lastAlarm.x, S.lastAlarm.y, '#ff4a4a', false);
     for (const k of S.cops) if (me.role === 'chor' && k.st === 'chase' && k.target === me.id) pin(k.rx, k.ry, '#ff5050', false);
     c.beginPath(); c.arc(size / 2, size / 2, size / 2 - 1.5, 0, TAU); c.lineWidth = 3; c.strokeStyle = S.danger > 0.1 ? '#ff5050' : '#28324b'; c.stroke();
@@ -1076,8 +1139,15 @@ function finishMatch(o) {
     if (won) { save.night = Math.max(save.night, S.night + 1); $('btnAgain').textContent = 'Next night · ' + (S.night + 1); note = medals < 3 ? 'Stars: win, win without a bust, win inside ' + mmss(S.cfg.par || 150) + '. ' : 'All three stars! '; note += 'Night ' + (S.night + 1) + ' needs more loot and brings sharper police.'; }
     else $('btnAgain').textContent = 'Try night ' + S.night + ' again';
     $('btnAgain').disabled = false;
-  } else if (S.isHost) { $('btnAgain').textContent = 'Back to the room'; $('btnAgain').disabled = false; }
-  else { $('btnAgain').textContent = 'Waiting for the host…'; $('btnAgain').disabled = true; }
+  } else {
+    if (S.isHost) { $('btnAgain').textContent = 'Back to the room'; $('btnAgain').disabled = false; }
+    else { $('btnAgain').textContent = 'Waiting for the host…'; $('btnAgain').disabled = true; }
+    if (S.cfg && S.cfg.name) $('endWhy').textContent = o.why + '  ' + S.cfg.name + (S.cfg.twist ? ' · Twist: ' + S.cfg.twist.name : '') + '.';
+    const q = cleanSeries(o.sr); if (q.rounds) stats.push(['Series', 'Chors ' + q.chor + ' – ' + q.police + ' Police']);
+    const lv = o.lv | 0, nx = o.nx | 0;
+    if (lv && nx > lv) note = 'The chors cleared level ' + lv + '. Next round is level ' + nx + ' · ' + LEVEL_NAMES[nx] + '. ';
+    else if (lv) note = 'Next round stays at level ' + nx + ' · ' + LEVEL_NAMES[nx] + '. ';
+  }
   const es = $('endStats'); es.innerHTML = '';
   for (const s of stats) { const d = document.createElement('div'), l = document.createElement('span'), vv = document.createElement('b'); l.className = 'label'; l.textContent = s[0]; vv.textContent = s[1]; d.append(l, vv); es.appendChild(d); }
   const list = $('endList'); list.innerHTML = '';
@@ -1093,6 +1163,7 @@ function refreshMenu() {
   const st = save.medals[save.night] || 0;
   $('btnSolo').textContent = 'Play solo · Night ' + save.night + ' · ' + matchSetup(1, 0, save.night).name + (st ? '  ' + '★'.repeat(st) : '');
   $('rankName').textContent = rankFor(save.total); $('rankLoot').textContent = money(save.total);
+  const tw = TOWNS.find(t => t.id === MAP_ID) || TOWNS[0]; $('btnTown').textContent = 'Town: ' + tw.name + ' · ' + tw.country + '  (tap to change)';
   $('btnMute').textContent = isMuted() ? 'Sound off' : 'Sound on';
   const q = 'Graphics: ' + (save.quality === 'auto' ? 'Auto' : save.quality === 'high' ? 'High' : 'Low'); $('btnQuality').textContent = q; $('btnQuality2').textContent = q;
   const mu = 'Music: ' + (isMusicOn() ? 'on' : 'off'); $('btnMusic').textContent = mu; $('btnMusic2').textContent = mu;
@@ -1112,7 +1183,7 @@ function applyQuality() {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, pixelCap)); resize();
 }
 function leaveNet() { if (S.net) { try { if (S.isHost) S.net.broadcast({ k: 'bye' }); else S.net.send({ k: 'bye' }); } catch (e) {} const n = S.net; S.net = null; setTimeout(() => { try { n.close(); } catch (e) {} }, 150); } }
-function toMenu(msg) { leaveNet(); S.isHost = true; S.solo = true; S.myId = 'h'; document.body.classList.remove('hiding'); hudCache.hiding = false; clearDyn(); arrow.visible = false; fx.setRain(0); S.openDoors = []; S.searchLv = {}; setScreen('menu'); refreshMenu(); $('menuErr').textContent = msg || ''; }
+function toMenu(msg) { leaveNet(); S.isHost = true; S.solo = true; S.myId = 'h'; nightLook(null); document.body.classList.remove('hiding'); hudCache.hiding = false; clearDyn(); arrow.visible = false; fx.setRain(0); S.openDoors = []; S.searchLv = {}; setScreen('menu'); refreshMenu(); $('menuErr').textContent = msg || ''; }
 function spawnFor(role, k) {
   if (role === 'police') { const p = W.policeSpawns[k % W.policeSpawns.length]; return { x: p.x, y: p.y, a: p.a }; }
   // up to four cars per corner; a second car at the same corner starts a car-length behind the first
@@ -1125,16 +1196,33 @@ function startSolo() {
   const sp = spawnFor('chor', Math.floor(Math.random() * 4));
   beginMatch({ cfg: matchSetup(1, 0, S.night), players: [{ id: 'h', name: save.name, role: 'chor', x: sp.x, y: sp.y, a: sp.a, paint: paintHex(save.paint) }] });
 }
+// What the host has chosen for the room: level 1 to 10, which town ('' Jugnupur, 'hotaru', or '?' for a different one each round),
+// whether each round gets a random night and twist, and whether the level goes up when the chors win.
+const cleanOpts = o => ({
+  level: Math.max(1, Math.min(10, (o && o.level) | 0 || 3)),
+  town: o && (o.town === '?' || TOWNS.some(t => t.id === o.town)) ? o.town : '',
+  surprises: !o || o.surprises !== false, autoLevel: !o || o.autoLevel !== false,
+});
+const cleanSeries = q => ({ rounds: Math.max(0, (q && q.rounds) | 0), chor: Math.max(0, (q && q.chor) | 0), police: Math.max(0, (q && q.police) | 0) });
 function renderLobby() {
-  const L = S.lobby, me = L.players.find(p => p.id === S.myId);
+  const L = S.lobby, me = L.players.find(p => p.id === S.myId), O = L.opts, host = S.isHost;
   $('roomCode').textContent = L.code; $('pcount').textContent = L.players.length;
   const ul = $('plist'); ul.innerHTML = '';
   for (const p of L.players) { const li = document.createElement('li'); const sw = document.createElement('span'); sw.style.cssText = 'width:14px;height:14px;border-radius:50%;flex:none;border:1px solid rgba(255,255,255,.3);background:#' + ((p.role === 'chor' ? (p.paint | 0) : 0xdfe6f2).toString(16).padStart(6, '0')); const nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = p.name + (p.id === S.myId ? ' (you)' : '') + (p.id === 'h' ? ' · host' : ''); const tg = document.createElement('span'); tg.className = 'tag ' + p.role; tg.textContent = p.role === 'chor' ? 'Chor' : 'Police'; li.append(sw, nm, tg); ul.appendChild(li); }
-  const nc = L.players.filter(p => p.role === 'chor').length, np = L.players.length - nc, setup = matchSetup(Math.max(1, nc), np, 1);
+  const nc = L.players.filter(p => p.role === 'chor').length, np = L.players.length - nc, setup = roomSetup(Math.max(1, nc), np, O.level);
   $('btnRoleChor').disabled = !!me && me.role === 'chor'; $('btnRolePolice').disabled = !!me && me.role === 'police';
-  $('lobbyInfo').textContent = nc === 0 ? 'At least one player must be a chor.' : `${nc} getaway car${nc > 1 ? 's' : ''} against ${np} police player${np === 1 ? '' : 's'}${setup.cops ? ' and ' + setup.cops + ' computer jeep' + (setup.cops > 1 ? 's' : '') : ''}. Chors must bank ${money(setup.target)} in 4 minutes.`;
-  $('btnStart').hidden = !S.isHost; $('btnStart').disabled = nc === 0;
-  if (!S.isHost) $('lobbyInfo').textContent += ' Waiting for the host to start.';
+  // tonight's settings: everyone sees them, only the host can change them
+  $('optTown').textContent = 'Town: ' + (O.town === '?' ? 'Surprise me · tonight ' + townName(MAP_ID) : townName(MAP_ID));
+  $('optLevel').textContent = 'Level ' + O.level + ' · ' + LEVEL_NAMES[O.level];
+  $('optSurprise').textContent = 'Surprises: ' + (O.surprises ? 'on' : 'off');
+  $('optAuto').textContent = 'Auto level-up: ' + (O.autoLevel ? 'on' : 'off');
+  for (const id of ['optTown', 'optSurprise', 'optAuto', 'btnShuffle']) $(id).disabled = !host;
+  $('optLevelDown').disabled = !host || O.level <= 1; $('optLevelUp').disabled = !host || O.level >= 10;
+  $('btnShuffle').hidden = !host; $('hostNote').hidden = host;
+  $('lobbyInfo').textContent = nc === 0 ? 'At least one player must be a chor.' : `${nc} getaway car${nc > 1 ? 's' : ''} against ${np} police player${np === 1 ? '' : 's'}${setup.cops ? ' and ' + setup.cops + ' computer jeep' + (setup.cops > 1 ? 's' : '') : ''}. Chors must bank about ${money(setup.target)}.` + (O.surprises ? ' Each round brings a different night, a twist and new start points.' : '');
+  const Q = L.series; $('seriesLine').textContent = Q.rounds ? `Rounds played: ${Q.rounds} · Chors ${Q.chor} – ${Q.police} Police` : '';
+  $('btnStart').hidden = !host; $('btnStart').disabled = nc === 0;
+  if (!host) $('lobbyInfo').textContent += ' Waiting for the host to start.';
 }
 const heard = {};
 function hostDrop(pid) {
@@ -1145,9 +1233,13 @@ function hostDrop(pid) {
   if (S.screen === 'lobby' && S.lobby.players.length !== was) broadcastLobby();
 }
 // both sides say "still here" every two seconds; fifteen seconds of silence means the other side is gone
+let lastBeat = 0;
 function heartbeatNet() {
-  if (!S.net || S.solo) return;
+  if (!S.net || S.solo) { lastBeat = 0; return; }
   const now = performance.now();
+  // if this page itself was frozen for a while (building a town, a slow first frame), the silence was ours: do not blame the others
+  if (lastBeat && now - lastBeat > 6000) { if (S.hostHeard) S.hostHeard = Math.max(S.hostHeard, now); for (const k of Object.keys(heard)) heard[k] = Math.max(heard[k], now); }
+  lastBeat = now;
   if (S.isHost) {
     if (S.screen !== 'play') S.net.broadcast({ k: 'hb' });
     for (const p of S.lobby.players.slice()) if (p.id !== 'h') { if (!heard[p.id]) heard[p.id] = now; else if (now - heard[p.id] > 15000) { S.net.kick(p.id); hostDrop(p.id); } }
@@ -1156,7 +1248,7 @@ function heartbeatNet() {
     if (S.hostHeard && now - S.hostHeard > 15000) toMenu('Lost the connection to the host.');
   }
 }
-function broadcastLobby() { if (!S.net || !S.isHost) return; for (const p of S.lobby.players) if (p.id !== 'h') S.net.send(p.id, { k: 'lobby', you: p.id, code: S.lobby.code, players: S.lobby.players, map: MAP_ID }); renderLobby(); }
+function broadcastLobby() { if (!S.net || !S.isHost) return; for (const p of S.lobby.players) if (p.id !== 'h') S.net.send(p.id, { k: 'lobby', you: p.id, code: S.lobby.code, players: S.lobby.players, map: MAP_ID, opts: S.lobby.opts, series: S.lobby.series }); renderLobby(); }
 async function createRoom() {
   initAudio(); $('menuErr').textContent = 'Creating a room…'; $('btnCreate').disabled = true;
   save.name = myName(); storeSave(); leaveNet();
@@ -1166,6 +1258,7 @@ async function createRoom() {
       if (!m || typeof m !== 'object') return;
       heard[pid] = performance.now();
       if (m.k === 'hb') return;
+      if (m.k === 'wait') { heard[pid] = performance.now() + 45000; return; }   // they are busy loading a town: be patient
       if (m.k === 'bye') { net.kick(pid); hostDrop(pid); return; }
       if (m.k === 'hello') {
         if (m.v !== CFG.PROTO) { net.send(pid, { k: 'old' }); setTimeout(() => net.kick(pid), 400); return; }
@@ -1187,7 +1280,7 @@ async function createRoom() {
     const code = await net.open();
     if (S.screen !== 'menu' || S.net) { net.close(); $('btnCreate').disabled = false; return; }   // gave up waiting and started something else
     S.net = net; S.isHost = true; S.solo = false; S.myId = 'h';
-    S.lobby = { code, players: [{ id: 'h', name: save.name, role: 'chor', paint: paintHex(save.paint) }] };
+    S.lobby = { code, players: [{ id: 'h', name: save.name, role: 'chor', paint: paintHex(save.paint) }], opts: cleanOpts({ level: 3, town: MAP_ID }), series: cleanSeries(null), lastTwist: '' };
     $('menuErr').textContent = ''; setScreen('lobby'); renderLobby();
   } catch (e) { $('menuErr').textContent = e.message; net.close(); }
   $('btnCreate').disabled = false;
@@ -1202,13 +1295,15 @@ async function joinRoom() {
       if (!m || typeof m !== 'object') return;
       S.hostHeard = performance.now();
       if (m.k === 'hb') return;
+      if (m.k === 'wait') { S.hostHeard = performance.now() + 45000; return; }   // the host is busy loading a town
       if (m.k === 'bye') { toMenu('The host closed the room.'); return; }
-      if (m.k === 'lobby' && String(m.map || '') !== MAP_ID) { // the host is in another town: load that one and come straight back to the room
-        const town = String(m.map || '').replace(/[^a-z0-9-]/g, '').slice(0, 24), code = cleanCode(m.code);
-        leaveNet(); location.replace(location.pathname + '?' + (town ? 'map=' + town + '&' : '') + 'room=' + code + '&go=1'); return;
+      if (m.k === 'lobby') {
+        S.myId = m.you; S.lobby = { code: cleanCode(m.code), players: Array.isArray(m.players) ? m.players : [], opts: cleanOpts(m.opts), series: cleanSeries(m.series) };
+        if (S.screen !== 'lobby') { clearDyn(); nightLook(null); setScreen('lobby'); }
+        renderLobby();
+        ensureTown(String(m.map || ''));   // be in the host's town, ready for the start
       }
-      if (m.k === 'lobby') { S.myId = m.you; S.lobby = { code: m.code, players: m.players }; if (S.screen !== 'lobby') { clearDyn(); setScreen('lobby'); } renderLobby(); }
-      else if (m.k === 'start') beginMatch(m);
+      else if (m.k === 'start') { const go = m; ensureTown(String(go.map || '')).then(() => { if (S.net === net) beginMatch(go); }); }
       else if (m.k === 's') applySnapshot(m);
       else if (m.k === 'tp') { const me = S.me; if (me) { const v = me.v; v.x = m.x; v.y = m.y; v.a = +m.a || 0; v.vx = v.vy = v.vf = 0; me.tpSeq = m.q; me.scr = null; me.jailed = true; me.hidden = me.hiding = me.wasHidden = -1; S.cam.yaw = Math.PI - v.a; } }
       else if (m.k === 'note') feed(m.m);
@@ -1227,17 +1322,75 @@ async function joinRoom() {
   } catch (e) { $('menuErr').textContent = e.message; }
   $('btnJoin').disabled = false;
 }
+const shuffled = list => { const a = list.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); const t = a[i]; a[i] = a[j]; a[j] = t; } return a; };
+// A different place to start every round: somewhere on a proper road, well away from the police station, the loot and each other.
+function randomSpawns(n) {
+  const out = [], thana = W.policeSpawns[0];
+  for (let tries = 0; tries < 600 && out.length < n; tries++) {
+    const q = W.safeSpot(4 + Math.random() * 92, 8 + Math.random() * 84, false);
+    if (!W.policeOk(q.x, q.y) || W.inPark(q.x, q.y)) continue;
+    if (Math.hypot(q.x - thana.x, q.y - thana.y) < 26) continue;
+    if (W.sites.some(d => Math.hypot(d.x - q.x, d.y - q.y) < 5) || W.escapes.some(d => Math.hypot(d.x - q.x, d.y - q.y) < 8)) continue;
+    if (tries < 400 && W.posts.some(d => Math.hypot(d.x - q.x, d.y - q.y) < 14)) continue;   // police players may start at a post
+    if (out.some(o => Math.hypot(o.x - q.x, o.y - q.y) < (tries < 300 ? 14 : 3))) continue;
+    out.push(q);
+  }
+  while (out.length < n) out.push(spawnFor('chor', out.length));
+  return out;
+}
+// What is different about this round: the kind of night, a twist, which small places are shut, which hideouts are padlocked.
+function planRound(setup) {
+  const L = setup.level, night = pickNight(L, Math.random), twist = pickTwist(L, Math.random, S.lobby.lastTwist);
+  S.lobby.lastTwist = twist ? twist.id : '';
+  const cfg = composeRound(setup, night, twist);
+  const small = []; W.sites.forEach((d, i) => { if (d.tier < 3 && !d.coach) small.push(i); });
+  cfg.closedSites = shuffled(small).slice(0, 2);
+  cfg.closedHides = shuffled(W.hides.map(h => h.i)).slice(0, Math.round(W.hides.length * ((twist && twist.lockHides) || 0.12)));
+  cfg.openEsc = twist && twist.escapes ? shuffled(W.escapes.map(e => e.i)).slice(0, twist.escapes) : null;
+  cfg.hot = 1;
+  return cfg;
+}
 function hostStart() {
   const L = S.lobby, cs = L.players.filter(p => p.role === 'chor'), ps = L.players.filter(p => p.role === 'police');
   if (!cs.length) { $('lobbyErr').textContent = 'At least one player must be a chor.'; return; }
   $('lobbyErr').textContent = '';
-  const players = [];
-  cs.forEach((p, k) => { const sp = spawnFor('chor', k); players.push({ id: p.id, name: p.name, role: 'chor', x: sp.x, y: sp.y, a: sp.a, paint: p.paint }); });
-  ps.forEach((p, k) => { const sp = spawnFor('police', k); players.push({ id: p.id, name: p.name, role: 'police', x: sp.x, y: sp.y, a: sp.a }); });
-  const cfg = matchSetup(cs.length, ps.length, 1);
+  const O = L.opts, setup = roomSetup(cs.length, ps.length, O.level);
+  const cfg = O.surprises ? planRound(setup) : Object.assign(composeRound(setup, NIGHT_KINDS[0], null), { name: 'Level ' + setup.level, night: null });
+  // never ask for more than the town holds tonight
+  applyRules(cfg.rules);
+  const shut = new Set(cfg.closedSites || []), avail = W.sites.reduce((sum, d, i) => sum + (shut.has(i) ? 0 : CFG.VALUE[d.tier]), 0);
+  cfg.target = Math.max(300, Math.min(cfg.target, Math.floor(avail * 0.7 / 50) * 50));
+  const players = [], chorAt = O.surprises ? randomSpawns(cs.length) : cs.map((p, k) => spawnFor('chor', k));
+  const posts = O.surprises ? shuffled(W.posts) : [];   // police players may start at one of the posts round town instead of the station yard
+  cs.forEach((p, k) => { const sp = chorAt[k]; players.push({ id: p.id, name: p.name, role: 'chor', x: sp.x, y: sp.y, a: sp.a, paint: p.paint }); });
+  ps.forEach((p, k) => { const sp = posts[k] ? W.safeSpot(posts[k].x, posts[k].y, true) : spawnFor('police', k); players.push({ id: p.id, name: p.name, role: 'police', x: sp.x, y: sp.y, a: sp.a }); });
   if (ps.length) cfg.copStart = ps.length; // computer jeeps park clear of the police players' spots
-  const msg = { k: 'start', cfg, players };
+  const msg = { k: 'start', cfg, players, map: MAP_ID };
   S.net.broadcast(msg); beginMatch(msg);
+}
+// Random sides, keeping the same number of police as now (and always at least one chor).
+function shuffleSides() {
+  if (!S.isHost || S.screen !== 'lobby') return;
+  const L = S.lobby, n = L.players.length, was = L.players.filter(p => p.role === 'police').length;
+  const np = Math.min(n - 1, (was === 0 || was === n) ? Math.floor(n / 2) : was);   // everyone on one side: split the room down the middle
+  shuffled(L.players).forEach((p, k) => { p.role = k < np ? 'police' : 'chor'; });
+  broadcastLobby();
+}
+// The host changes tonight's settings.
+function setOpt(change) {
+  if (!S.isHost || S.screen !== 'lobby') return;
+  const O = S.lobby.opts; change(O); S.lobby.opts = cleanOpts(O); sfx.click();
+  broadcastLobby();
+}
+// 'Surprise me': a town different from the one loaded now.
+const otherTown = () => { const pool = TOWNS.filter(t => t.id !== MAP_ID); return pool.length ? pool[Math.floor(Math.random() * pool.length)].id : MAP_ID; };
+function cycleTown() {
+  if (!S.isHost || S.screen !== 'lobby') return;
+  const order = TOWNS.map(t => t.id).concat(['?']), O = S.lobby.opts, cur = O.town === '?' ? '?' : MAP_ID;
+  const next = order[(order.indexOf(cur) + 1) % order.length];
+  O.town = next; sfx.click();
+  ensureTown(next === '?' ? otherTown() : next).then(() => broadcastLobby());
+  broadcastLobby();
 }
 
 // ------------------------------------------------------------------ input wiring
@@ -1245,8 +1398,6 @@ function bindUi() {
   $('name').value = save.name || '';
   const q = new URLSearchParams(location.search), room = cleanCode(q.get('room'));
   if (room.length === 4) { $('code').value = room; $('joinBox').hidden = false; }
-  // sent here by a room whose host is in this town: carry on into the room without asking again
-  if (room.length === 4 && q.get('go') === '1') { if (save.name) $('name').value = save.name; setTimeout(() => { if (S.screen === 'menu' && !S.net) joinRoom(); }, 300); }
   $('btnSolo').onclick = () => { sfx.click(); startSolo(); };
   $('btnCreate').onclick = () => createRoom();
   $('btnJoinOpen').onclick = () => { $('joinBox').hidden = !$('joinBox').hidden; if (!$('joinBox').hidden) $('code').focus(); };
@@ -1254,6 +1405,11 @@ function bindUi() {
   $('code').addEventListener('keydown', e => { if (e.key === 'Enter') joinRoom(); });
   $('btnRoleChor').onclick = () => setRole('chor'); $('btnRolePolice').onclick = () => setRole('police');
   $('btnStart').onclick = () => hostStart();
+  $('optTown').onclick = () => cycleTown();
+  $('optLevelDown').onclick = () => setOpt(o => { o.level--; }); $('optLevelUp').onclick = () => setOpt(o => { o.level++; });
+  $('optSurprise').onclick = () => setOpt(o => { o.surprises = !o.surprises; }); $('optAuto').onclick = () => setOpt(o => { o.autoLevel = !o.autoLevel; });
+  $('btnShuffle').onclick = () => { shuffleSides(); sfx.click(); };
+  $('btnTown').onclick = () => { const k = TOWNS.findIndex(t => t.id === MAP_ID), next = TOWNS[(k + 1) % TOWNS.length].id; save.town = next; storeSave(); sfx.click(); ensureTown(next); };
   $('btnLeave').onclick = () => toMenu('');
   $('btnCopy').onclick = async () => {
     const link = location.origin + location.pathname + '?' + (MAP_ID ? 'map=' + MAP_ID + '&' : '') + 'room=' + S.lobby.code;
@@ -1271,7 +1427,12 @@ function bindUi() {
   $('btnLights').onclick = () => toggleLights();
   $('btnSlip').onclick = () => leaveHide(0); $('btnBurst').onclick = () => leaveHide(1);
   if (!isTouch) { $('btnSlip').textContent = 'Slip out quietly · E'; $('btnBurst').textContent = 'Burst out · W'; }
-  $('btnAgain').onclick = () => { if (S.solo) startSolo(); else if (S.isHost) { clearDyn(); setScreen('lobby'); broadcastLobby(); } };
+  $('btnAgain').onclick = () => {
+    if (S.solo) { startSolo(); return; }
+    if (!S.isHost) return;
+    clearDyn(); nightLook(null); setScreen('lobby'); broadcastLobby();
+    if (S.lobby.opts.town === '?') ensureTown(otherTown()).then(() => broadcastLobby());   // a different town for the next round
+  };
   $('btnEndMenu').onclick = () => toMenu('');
   $('mini').onclick = () => $('mini').classList.toggle('big');
   const hold = (id, key) => { const b = $(id); const on = e => { e.preventDefault(); In[key] = true; b.classList.add('down'); initAudio(); }; const off = () => { In[key] = false; b.classList.remove('down'); }; b.addEventListener('pointerdown', on); b.addEventListener('pointerup', off); b.addEventListener('pointercancel', off); b.addEventListener('pointerleave', off); b.addEventListener('contextmenu', e => e.preventDefault()); };
@@ -1331,6 +1492,8 @@ function togglePause(force) {
   const on = force === undefined ? $('pause').hidden : force;
   show('pause', on); S.paused = on && S.solo;
   $('pauseNote').textContent = S.solo ? 'The round is paused.' : 'The round keeps running while this menu is open.';
+  const c = S.cfg || {};
+  $('pauseTonight').textContent = (c.night || c.twist) ? [c.name, c.night ? c.night.blurb : '', c.twist ? 'Twist · ' + c.twist.name + ': ' + c.twist.blurb : ''].filter(Boolean).join(' ') : '';
   In.keys.clear();
 }
 function resize() {
@@ -1374,33 +1537,88 @@ function frame(now) {
   }
   updateCamera(dt, time); updateLights(dt, time); updateLabels();
   fx.update(dt, time, focusPt.set(S.cam.tgt.x, S.cam.tgt.z));
-  dressing.update(dt, time);
-  ambient.update(dt, time, focusPt, fx); U.uTime.value = time % 3600;
+  if (dressing) dressing.update(dt, time);
+  if (ambient) ambient.update(dt, time, focusPt, fx);
+  U.uTime.value = time % 3600;
   post.render(dt);
   // if a phone cannot keep up, quietly drop the expensive effects once
   if (save.quality === 'auto' && playing && !S.dropped) { S.lowFps = fpsAvg < 22 ? S.lowFps + dt : 0; if (S.lowFps > 4) { S.dropped = true; post.setEnabled(false); fx.setQuality('low'); pixelCap = 1; renderer.setPixelRatio(1); resize(); toast('Graphics lowered for smoother driving.'); } }
 }
 const focusPt = { x: 50, z: 50, set(x, z) { this.x = x; this.z = z; return this; } };
 
-async function boot() {
-  // ?map=hotaru loads data/map-hotaru.json; without it, Jugnupur
-  const mapId = (new URLSearchParams(location.search).get('map') || '').toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 24);
+// ------------------------------------------------------------------ towns: one is loaded at a time, and can be swapped for another
+function unloadTown() {
+  if (!town) return;
+  clearDyn();
+  try { if (dressing) dressing.dispose(); } catch (e) { /* already gone */ }
+  try { if (ambient) ambient.dispose(); } catch (e) { /* already gone */ }
+  if (H) for (const hv of H.hideVis) { try { hv.ho.dispose(); } catch (e) { /* already gone */ } }
+  town.traverse(o => {
+    if (o.geometry) o.geometry.dispose();
+    const mats = Array.isArray(o.material) ? o.material : o.material ? [o.material] : [];
+    for (const m of mats) { for (const k of ['map', 'emissiveMap', 'roughnessMap']) if (m[k]) m[k].dispose(); m.dispose(); }
+    if (o.isInstancedMesh) o.dispose();
+  });
+  scene.remove(town); town = null; LABELS.length = 0; dressing = null; ambient = null;
+}
+async function loadTown(id) {
+  id = TOWNS.some(t => t.id === id) ? id : '';
   let map = null;
-  if (mapId) { try { const r = await fetch('data/map-' + mapId + '.json'); if (r.ok) map = await r.json(); } catch (e) { map = null; } }
-  if (map) MAP_ID = mapId;
-  if (!map) map = await (await fetch('data/map.json')).json();
-  if (typeof map.currency === 'string' && map.currency.length <= 3) CUR = map.currency;
-  try { await Promise.race([Promise.all([document.fonts.load('700 46px "Baloo 2"'), document.fonts.load('600 16px "Hind"')]), new Promise(r => setTimeout(r, 1800))]); } catch (e) { /* fall back to system fonts */ }
+  try { const r = await fetch(id ? 'data/map-' + id + '.json' : 'data/map.json'); if (r.ok) map = await r.json(); } catch (e) { map = null; }
+  if (!map) { if (!id) throw new Error('The town could not be loaded.'); return loadTown(''); }
+  unloadTown();
+  MAP_ID = id; CUR = (typeof map.currency === 'string' && map.currency.length <= 3) ? map.currency : '₹';
   W = buildWorld(map);
+  town = new THREE.Group(); scene.add(town);
   const high = highQ();
-  H = buildScene(scene, map, W, U, { ground: high ? 2048 : 1024, aniso: Math.min(8, renderer.capabilities.getMaxAnisotropy()), wet: high, cones: true });
-  fx = new Fx(scene, { quality: high ? 'high' : 'low' });
-  dressing = buildDressing(scene, W, { hash2, U, vocab: map.signs || null });
+  H = buildScene(town, map, W, U, { ground: high ? 2048 : 1024, aniso: Math.min(8, renderer.capabilities.getMaxAnisotropy()), wet: high, cones: true });
+  dressing = buildDressing(town, W, { hash2, U, vocab: map.signs || null });
   for (const vz of H.siteVis) if (vz.label) vz.label.userData.far = true;   // loot name tags are worth seeing from further off
   for (const vz of (H.escVis || [])) if (vz.label) vz.label.userData.far = true;
-  ambient = buildAmbient(scene, W, map, { hash2, camera, cutMat: H.cutMat });
-  if (W.layout.fog) { scene.fog.near = W.layout.fog[0]; scene.fog.far = W.layout.fog[1]; }
+  ambient = buildAmbient(town, W, map, { hash2, camera, cutMat: H.cutMat });
   miniBase = document.createElement('canvas'); miniBase.width = miniBase.height = 500; paintMini(miniBase, map, W);
+  S.sites = []; S.openDoors = []; S.searchLv = {}; S.searchFound = {}; S.hot = null; hudCache = {};
+  nightLook(null);
+}
+// Switches town if another one is wanted, with a word on screen while it builds. Calls queue up, so two never run at once.
+let townQueue = Promise.resolve();
+function ensureTown(id) {
+  id = TOWNS.some(t => t.id === id) ? id : '';
+  townQueue = townQueue.then(async () => {
+    if (id === MAP_ID && town) return;
+    const ld = $('loading'); ld.textContent = 'Loading ' + townName(id) + '…'; ld.hidden = false;
+    // building a town keeps this page busy for a few seconds: tell the others, so nobody takes the silence for a lost connection
+    if (S.net && !S.solo) { try { if (S.isHost) S.net.broadcast({ k: 'wait' }); else S.net.send({ k: 'wait' }); } catch (e) { /* not connected */ } }
+    await new Promise(r => setTimeout(r, 60));   // let the words appear (and the note go out) before the building starts
+    try { await loadTown(id); } catch (e) { toast('That town could not be loaded.'); }
+    const now = performance.now(); if (S.hostHeard) S.hostHeard = Math.max(S.hostHeard, now); for (const k of Object.keys(heard)) heard[k] = Math.max(heard[k], now);
+    ld.hidden = true; refreshMenu(); if (S.screen === 'lobby') renderLobby();
+  });
+  return townQueue;
+}
+// How the night looks: fog, street lamps, lit windows and signs, moonlight. null puts the town back to its usual look.
+let LIGHT_MUL = 1;
+const MIST = 0x4a5364;
+function nightLook(cfg) {
+  const misty = !!(cfg && cfg.fog), dark = !!(cfg && cfg.dark);
+  const fg = (cfg && cfg.fog) || (W && W.layout.fog) || [16, 52];
+  scene.fog.near = fg[0]; scene.fog.far = fg[1];
+  scene.fog.color.setHex(misty ? MIST : COLORS.fog); scene.background.setHex(misty ? MIST : COLORS.fog);
+  LIGHT_MUL = dark ? 0.72 : (cfg && cfg.bright) ? 1.3 : 1;
+  U.uPower.value = dark ? 0.05 : 1;                                   // windows and shop lights
+  if (H && H.ground) H.ground.material.emissiveIntensity = dark ? 0.55 : 2.1;   // pools of lamp light on the road
+  if (H && H.bulbs) H.bulbs.material.color.setScalar(dark ? 0.08 : 1);
+  if (ambient) ambient.setNight({ power: dark ? 0.04 : 1, mist: misty ? 0.9 : 0, mistColor: MIST });
+  if (dressing && dressing.group) dressing.group.traverse(o => { if (o.material && o.material.isMeshBasicMaterial) o.material.color.setScalar(dark ? 0.07 : 1); });   // neon signs
+  S.dark = dark;
+}
+
+async function boot() {
+  // ?map=hotaru opens that town; otherwise the one picked last time, otherwise Jugnupur
+  const asked = (new URLSearchParams(location.search).get('map') || '').toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 24);
+  try { await Promise.race([Promise.all([document.fonts.load('700 46px "Baloo 2"'), document.fonts.load('600 16px "Hind"')]), new Promise(r => setTimeout(r, 1800))]); } catch (e) { /* fall back to system fonts */ }
+  fx = new Fx(scene, { quality: highQ() ? 'high' : 'low' });
+  await loadTown(TOWNS.some(t => t.id === asked) && asked ? asked : (save.town || ''));
   setMuted(!!save.muted); setMusicOn(save.music !== false);
   if (!PAINTS.some(p => p.id === save.paint)) save.paint = PAINTS[0].id;
   bindUi(); applyQuality(); refreshMenu();
@@ -1408,6 +1626,6 @@ async function boot() {
   setInterval(hostLoop, 33); setInterval(heartbeatNet, 2000);
   window.addEventListener('pagehide', () => { if (S.net && !S.solo) { try { if (S.isHost) S.net.broadcast({ k: 'bye' }); else S.net.send({ k: 'bye' }); } catch (e) {} } });
   requestAnimationFrame(frame);
-  window.__cp = { S, W, CFG, In, scene, doAction, hostTick, startSolo, save, camera, renderer, post, drive, makeDriver, stepVehicle, fps: () => fpsAvg }; // handy for testing in the console
+  window.__cp = { S, get W() { return W; }, randomSpawns, nightLook, heard, get town() { return MAP_ID; }, ensureTown, CFG, In, scene, doAction, hostTick, startSolo, save, camera, renderer, post, drive, makeDriver, stepVehicle, fps: () => fpsAvg }; // handy for testing in the console
 }
 boot().catch(err => { console.error(err); $('loading').textContent = 'Could not start the game: ' + err.message; });

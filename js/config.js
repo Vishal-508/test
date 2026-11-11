@@ -43,8 +43,106 @@ export const CFG = {
   TIP_EVERY: 12, TIP_EVERY_JACKPOT: 8,   // carrying loot through lit streets gets you reported this often
   HEAT_MAX: 5,
 
-  MAX_PLAYERS: 8, PROTO: 3,
+  MAX_PLAYERS: 8, PROTO: 4,
 };
+
+// ------------------------------------------------------------------ a round can bend the numbers
+// The host decides what is different tonight (a longer round, loot worth more, engines that cool slowly...) and
+// sends it with the start of the round; every player applies the same changes with applyRules().
+const BASE = JSON.parse(JSON.stringify(CFG));
+export function applyRules(r) {
+  for (const k of Object.keys(BASE)) { if (BASE[k] && typeof BASE[k] === 'object') Object.assign(CFG[k], BASE[k]); else CFG[k] = BASE[k]; }   // back to the standard numbers
+  if (!r) return;
+  const num = (v, lo, hi, d) => (typeof v === 'number' && isFinite(v) ? Math.max(lo, Math.min(hi, v)) : d);
+  CFG.ROUND = r.round ? num(r.round, 120, 420, BASE.ROUND) : BASE.ROUND;
+  CFG.COACH_OPEN = Math.round(CFG.ROUND * 0.5); CFG.COACH_CLOSE = CFG.COACH_OPEN + 45;
+  CFG.JACKPOT_AT = num(r.jackpotAt, 0, 120, BASE.JACKPOT_AT);
+  const hold = num(r.holdMul, 0.3, 2, 1), loot = num(r.lootMul, 0.5, 3, 1), cool = num(r.coolMul, 0.3, 3, 1);
+  for (const t of [1, 2, 3]) { CFG.HOLD[t] = BASE.HOLD[t] * hold; CFG.VALUE[t] = Math.round(BASE.VALUE[t] * loot / 10) * 10; }
+  CFG.HIDE.COOL = BASE.HIDE.COOL * cool; CFG.HIDE.COOL_NITRO = BASE.HIDE.COOL_NITRO * cool;
+  CFG.HIDE.INFORMER = num(r.informerAt, 6, 60, BASE.HIDE.INFORMER);
+  CFG.NITRO.REGEN = BASE.NITRO.REGEN * num(r.nitroMul, 0.1, 8, 1);
+}
+
+// ------------------------------------------------------------------ towns
+// `officers`: who drives the computer jeeps (dealt out afresh every round, so the bust messages name different people)
+export const TOWNS = [
+  { id: '', name: 'Jugnupur', country: 'India', officers: ['Insp. Tiwari', 'Havaldar Pandu', 'Daroga Shamsher', 'SI Bhola', 'Hav. Tukaram', 'Insp. Rathore', 'Sipahi Lallan', 'Daroga Yadav', 'SI Meena', 'Insp. Durga', 'Hav. Ganpat', 'SI Kiran'] },
+  { id: 'hotaru', name: 'Hotaru-cho', country: 'Japan', officers: ['Junsa Sato', 'Junsa Tanaka', 'Keibu Yamada', 'Junsa Suzuki', 'Keibu-ho Ito', 'Junsa Kimura', 'Keibu Mori', 'Junsa Ono', 'Junsa-cho Abe', 'Keibu Hayashi', 'Junsa Ogawa', 'Junsa Endo'] },
+];
+export const townName = id => { const t = TOWNS.find(q => q.id === id); return t ? t.name : 'Jugnupur'; };
+
+// ------------------------------------------------------------------ rooms: levels, nights and twists
+// A room has a level from 1 to 10. Higher levels mean more jeeps, faster and sharper police and a bigger target.
+export const LEVEL_NAMES = ['', 'Aasaan', 'Aasaan', 'Theek-thaak', 'Theek-thaak', 'Mushkil', 'Mushkil', 'Khatarnak', 'Khatarnak', 'Namumkin', 'Namumkin'];
+export function roomSetup(nChors, nHumanPolice, level) {
+  const L = Math.max(1, Math.min(10, level | 0 || 3)), n = Math.max(1, Math.min(8, nChors | 0));
+  const base = [0, 800, 1300, 1700, 2000, 2200, 2300, 2300, 2300][n];
+  const wanted = [0, 3, 3, 4, 4, 5, 5, 5, 5][n] + Math.floor((L - 3) / 2);   // levels 1-2 one jeep fewer, 5-6 one more, 7-8 two, 9-10 three
+  // computer jeeps are easier to fool than a person, so one police player stands in for two of them
+  return {
+    level: L, target: Math.round(base * (0.82 + 0.06 * L) / 50) * 50,
+    cops: Math.max(0, Math.min(7, Math.max(1, wanted)) - 2 * nHumanPolice),
+    speedMul: Math.min(0.9 + 0.016 * (L - 1), 1.05), visionMul: Math.min(1 + 0.03 * (L - 1), 1.27),
+    bustMul: Math.min(0.75 + 0.05 * (L - 1), 1.15), tipMul: Math.max(0.8, 1.4 - 0.08 * (L - 1)),
+    rain: 0, informer: L >= 2, par: 150, name: '',
+  };
+}
+// What kind of night it is. Picked at random for each round when the room has surprises switched on.
+//   w how often it comes up, minLevel the lowest level it appears at; the rest are its effects.
+export const NIGHT_KINDS = [
+  { id: 'saaf', name: 'Saaf Raat', blurb: 'A clear night.', w: 3 },
+  { id: 'barsaat', name: 'Barsaat', blurb: 'Rain. Wet roads slide, and the police see less.', w: 2, rain: 0.85, grip: 0.62, vision: 0.9 },
+  { id: 'toofan', name: 'Toofani Raat', blurb: 'Storm. Very slippery, short sight, few witnesses about.', w: 1, minLevel: 3, rain: 1, grip: 0.5, vision: 0.82, tip: 1.5 },
+  { id: 'kohra', name: 'Kohra', blurb: 'Fog. Nobody sees far tonight.', w: 2, fog: [2, 20], vision: 0.68 },
+  { id: 'bijli', name: 'Bijli Gul', blurb: 'Power cut. The street lamps are out.', w: 1.5, dark: 1, vision: 0.78 },
+  { id: 'mela', name: 'Mela ki Raat', blurb: 'Festival night. The tills are full, and so are the streets.', w: 1.5, loot: 1.25, tip: 0.6 },
+  { id: 'purnima', name: 'Purnima', blurb: 'Full moon. The police see further.', w: 1.5, vision: 1.2, bright: 1 },
+];
+// One odd rule for the round, on most nights.
+export const TWISTS = [
+  { id: 'tez', name: 'Tez Gaadiyan', blurb: 'Every engine in town is tuned: all cars are faster.', car: 1.12 },
+  { id: 'nitro', name: 'Nitro ki Barsaat', blurb: 'Nitro refills four times as fast.', nitro: 4 },
+  { id: 'sookha', name: 'Sookha Tank', blurb: 'Nitro hardly refills by itself. Drift for it.', nitro: 0.3 },
+  { id: 'garam', name: 'Garam Engine', blurb: 'Engines take twice as long to cool in a hideout.', cool: 2 },
+  { id: 'thanda', name: 'Thanda Engine', blurb: 'Engines cool in half the time.', cool: 0.5 },
+  { id: 'mukhbir', name: 'Mukhbir Raat', blurb: 'Informers everywhere: 12 seconds in a hideout and somebody talks.', informerAt: 12, minLevel: 2 },
+  { id: 'sona', name: 'Sone ki Raat', blurb: 'Everything is worth half as much again, and the target is higher.', loot: 1.5, target: 1.4 },
+  { id: 'khuli', name: 'Khuli Tijori', blurb: 'The tijoris are open from the first second.', jackpotAt: 1 },
+  { id: 'der', name: 'Der se Tijori', blurb: 'The tijoris stay shut for the first 75 seconds.', jackpotAt: 75 },
+  { id: 'dheele', name: 'Dheele Taale', blurb: 'Weak locks: every job takes half the time.', hold: 0.5 },
+  { id: 'mazboot', name: 'Mazboot Taale', blurb: 'Strong locks: every job takes half as long again.', hold: 1.5 },
+  { id: 'lambi', name: 'Lambi Raat', blurb: 'A five-minute round, with a bigger target.', round: 300, target: 1.25 },
+  { id: 'chhoti', name: 'Chhoti Raat', blurb: 'Three minutes only, and a smaller target.', round: 180, target: 0.72 },
+  { id: 'do', name: 'Do Raaste', blurb: 'Only two hand-off points are open tonight.', escapes: 2 },
+  { id: 'band', name: 'Band Darwaze', blurb: 'A third of the hideouts are padlocked.', lockHides: 0.34 },
+  { id: 'naka', name: 'Naka-bandi', blurb: 'Two extra police jeeps are out.', cops: 2 },
+  { id: 'nazar', name: 'Nazar', blurb: 'Every 20 seconds the police radio says where each getaway car is.', tracker: 20 },
+];
+// Puts a level's setup, a kind of night and a twist together into what the round runs on.
+// `rnd` is a function giving numbers from 0 to 1 (Math.random in the game, a fixed one in tests).
+export function composeRound(setup, night, twist) {
+  const c = Object.assign({}, setup), n = night || NIGHT_KINDS[0], t = twist || null, loot = (n.loot || 1) * ((t && t.loot) || 1);
+  c.rain = n.rain || 0; c.gripMul = n.grip || 1; c.fog = n.fog || null; c.dark = n.dark ? 1 : 0; c.bright = n.bright ? 1 : 0;
+  c.visionMul = setup.visionMul * (n.vision || 1); c.tipMul = setup.tipMul * (n.tip || 1);
+  c.carMul = (t && t.car) || 1; c.tracker = (t && t.tracker) || 0; c.cops = setup.cops + ((t && t.cops) || 0);
+  c.target = Math.round(setup.target * ((t && t.target) || 1) / 50) * 50;
+  c.rules = { round: (t && t.round) || undefined, jackpotAt: t && t.jackpotAt != null ? t.jackpotAt : undefined, holdMul: (t && t.hold) || 1, lootMul: loot, coolMul: (t && t.cool) || 1, informerAt: (t && t.informerAt) || undefined, nitroMul: (t && t.nitro) || 1 };
+  c.night = { name: n.name, blurb: n.blurb }; c.twist = t ? { name: t.name, blurb: t.blurb } : null;
+  c.name = 'Level ' + setup.level + ' · ' + n.name;
+  return c;
+}
+export function pickNight(level, rnd) {
+  const pool = NIGHT_KINDS.filter(n => (n.minLevel || 1) <= level), total = pool.reduce((s, n) => s + n.w, 0);
+  let r = rnd() * total;
+  for (const n of pool) { r -= n.w; if (r <= 0) return n; }
+  return pool[0];
+}
+export function pickTwist(level, rnd, avoid) {
+  if (rnd() < 0.2) return null;   // one night in five is plain
+  const pool = TWISTS.filter(t => (t.minLevel || 1) <= level && t.id !== avoid);
+  return pool[Math.floor(rnd() * pool.length)] || null;
+}
 
 const NIGHTS = ['Pehli Raat', 'Chandni Raat', 'Barsaat ki Raat', 'Naka-bandi', 'Amavas', 'Toofani Raat', 'Sarraf ka Badla', 'Kotwal ki Kasam', 'Kali Raat', 'Aakhri Daud'];
 

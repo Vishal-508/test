@@ -1,10 +1,10 @@
 // Builds the town you drive through: wet painted ground that reacts to headlights, instanced buildings
 // with lit windows, landmarks, street lamps with light cones, loot markers, hideouts and labels.
 import * as THREE from '../vendor/three.module.min.js';
-import { N, CS, T, LANE, hash2 } from './world.js?v=4';
-import { buildHideout, kindFor } from './hideouts.js?v=4';
-import { CFG } from './config.js?v=4';
-import { canDrawKana, mergeBoxes } from './ambient.js?v=4';
+import { N, CS, T, LANE, hash2 } from './world.js?v=5';
+import { buildHideout, kindFor } from './hideouts.js?v=5';
+import { CFG } from './config.js?v=5';
+import { canDrawKana, mergeBoxes } from './ambient.js?v=5';
 
 const FONT = '"Baloo 2","Trebuchet MS","Segoe UI",sans-serif';
 
@@ -379,7 +379,7 @@ const FRONTS = `
 export function makeBuildingMaterial(U, windows) {
   const mat = new THREE.MeshLambertMaterial({ color: 0xffffff });
   mat.onBeforeCompile = sh => {
-    sh.uniforms.uCut = U.uCut; sh.uniforms.uRes = U.uRes; sh.uniforms.uTime = U.uTime || { value: 0 };
+    sh.uniforms.uCut = U.uCut; sh.uniforms.uRes = U.uRes; sh.uniforms.uTime = U.uTime || { value: 0 }; sh.uniforms.uPower = U.uPower || { value: 1 };
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nattribute float aSty;\nvarying vec3 vWPos;\nvarying vec3 vONormal;\nvarying float vDepthC;\nvarying vec4 vRoof;\nvarying float vSty;\nvarying float vBh;\nvarying float vBid;')
       .replace('#include <project_vertex>', `#include <project_vertex>
@@ -398,7 +398,7 @@ export function makeBuildingMaterial(U, windows) {
         vONormal = normal;
         vDepthC = - mvPosition.z;`);
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying vec3 vWPos;\nvarying vec3 vONormal;\nvarying float vDepthC;\nvarying vec4 vRoof;\nvarying float vSty;\nvarying float vBh;\nvarying float vBid;\nuniform vec3 uCut;\nuniform vec2 uRes;\nuniform float uTime;\nfloat hsC( vec2 p ) { return fract( sin( dot( p, vec2( 12.9898, 78.233 ) ) ) * 43758.5453 ); }\nfloat lodC( float freq, float depth ) { return clamp( 2.0 - depth * freq / 70.0, 0.0, 1.0 ); }\nfloat strC( float x, float freq, float duty, float depth ) { return mix( 1.0 - duty, step( duty, fract( x * freq ) ), lodC( freq, depth ) ); }')
+      .replace('#include <common>', '#include <common>\nvarying vec3 vWPos;\nvarying vec3 vONormal;\nvarying float vDepthC;\nvarying vec4 vRoof;\nvarying float vSty;\nvarying float vBh;\nvarying float vBid;\nuniform vec3 uCut;\nuniform vec2 uRes;\nuniform float uTime;\nuniform float uPower;\nfloat hsC( vec2 p ) { return fract( sin( dot( p, vec2( 12.9898, 78.233 ) ) ) * 43758.5453 ); }\nfloat lodC( float freq, float depth ) { return clamp( 2.0 - depth * freq / 70.0, 0.0, 1.0 ); }\nfloat strC( float x, float freq, float duty, float depth ) { return mix( 1.0 - duty, step( duty, fract( x * freq ) ), lodC( freq, depth ) ); }')
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
         {
           vec2 spC = gl_FragCoord.xy / uRes;
@@ -447,9 +447,10 @@ ${FRONTS}
             totalEmissiveRadiance += vec3( 1.0, 0.82, 0.5 ) * doorC * step( 0.9, shC ) * 0.4;
             }` : ''}
           }
+          totalEmissiveRadiance *= uPower;   // a power cut puts the windows and shop lights out
         }`);
   };
-  mat.customProgramCacheKey = () => 'bldg7' + (windows ? 1 : 0);
+  mat.customProgramCacheKey = () => 'bldg8' + (windows ? 1 : 0);
   return mat;
 }
 
@@ -675,7 +676,7 @@ export function buildScene(scene, map, W, U, quality) {
   bulb.instanceColor.needsUpdate = true; cones.instanceColor.needsUpdate = true;
   poles.frustumCulled = arms.frustumCulled = bulb.frustumCulled = cones.frustumCulled = false; cones.renderOrder = 3;
   scene.add(poles); scene.add(arms); scene.add(bulb); if (quality.cones) scene.add(cones);
-  H.cones = cones;
+  H.cones = cones; H.bulbs = bulb;
 
   // police posts
   for (const p of W.posts) {
@@ -696,8 +697,17 @@ export function buildScene(scene, map, W, U, quality) {
     const label = makeLabel(`${s.name}  ${map.currency || '₹'}${CFG.VALUE[s.tier] || s.value}`, { color: '#ffd98a', h: s.tier === 3 ? 0.5 : 0.4, border: s.tier === 3 ? 'rgba(243,180,63,0.9)' : null });
     label.position.set(0, 1.75 + sc * 0.2, 0); g.add(label);
     const lock = makeLabel('LOCKED', { color: '#ff9c9c', h: 0.3 }); lock.position.set(0, 1.35, 0); lock.visible = false; g.add(lock);
-    H.siteVis.push({ g, gem, beam, label, lock, state: -1, sc });
+    H.siteVis.push({ g, gem, beam, label, lock, state: -1, sc, text: '' });
   }
+  // Gives a place to rob a new name tag (its worth can change from round to round, and doubles while it is the hot target).
+  H.relabelSite = (i, text, hot) => {
+    const vz = H.siteVis[i], s = W.sites[i]; if (!vz || vz.text === text) return;
+    const old = vz.label, k = LABELS.indexOf(old); if (k >= 0) LABELS.splice(k, 1);
+    vz.g.remove(old); if (old.material.map) old.material.map.dispose(); old.material.dispose();
+    const label = makeLabel(text, { color: hot ? '#fff3b0' : '#ffd98a', h: (s.tier === 3 ? 0.5 : 0.4) * (hot ? 1.25 : 1), border: (s.tier === 3 || hot) ? 'rgba(243,180,63,0.9)' : null });
+    label.position.copy(old.position); label.visible = old.visible; label.userData.far = true; vz.g.add(label);
+    vz.label = label; vz.text = text;
+  };
   for (const e of W.escapes) {
     const g = new THREE.Group(); g.position.set(e.x, 0, e.y); scene.add(g);
     const beam = new THREE.Mesh(beamGeo, beamMat(COLORS.escape)); beam.scale.set(2.2, 1.25, 2.2); g.add(beam);

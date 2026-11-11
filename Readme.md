@@ -51,6 +51,20 @@ sometimes rain. Loot you bank raises your rank and unlocks new paint for the get
 Computer jeeps fill in when there are few police players. The player who created the room should
 keep the game tab open and in front, because their browser runs the round for everyone.
 
+The host sets up the room, and everyone sees the choices:
+
+- **Town:** Jugnupur, Hotaru-cho, or *Surprise me* for a different town each round. Everyone's game switches town without leaving the room.
+- **Level 1 to 10:** higher levels bring more jeeps, faster and sharper police and a bigger target. With **Auto level-up** on, the level rises by one each time the chors win.
+- **Surprises:** when on, no two rounds are the same. Each round gets
+  - a kind of night: clear, rain (wet roads slide), storm, fog, a power cut (lamps, windows and signs go out), festival night (more loot, more witnesses) or full moon;
+  - usually one twist, such as faster cars, slow-cooling engines, tijoris open from the start, a three-minute or five-minute round, only two hand-off points, padlocked hideouts, or extra jeeps;
+  - new start points for the getaway cars, and police players starting at posts round town;
+  - two small places shut and a few hideouts padlocked, different every time;
+  - a **hot target** now and then: one small place pays double for 25 seconds, and both sides are told.
+- **Shuffle sides** deals out chor and police at random.
+
+The room keeps a running score across rounds (Chors 2 – 1 Police).
+
 ## Hosting on GitHub Pages
 
 The game is plain files with no build step, so GitHub Pages serves it as it is. The live copy is the
@@ -74,7 +88,7 @@ another network or Wi-Fi.
 |---|---|
 | `index.html` | the page, menus and on-screen controls |
 | `js/game.js` | rules, police driving, multiplayer sync, input, camera and the main loop |
-| `js/config.js` | every tunable number: round length, speeds, bust meter, hideout timings, night ladder |
+| `js/config.js` | every tunable number: round length, speeds, bust meter, hideout timings, the solo night ladder, and the room levels, kinds of night and twists |
 | `js/vehicle.js` | car handling (drift, nitro, crashes) and the computer driver |
 | `js/world.js` | turns the map into roads, buildings, hideout bays, sight lines and routes |
 | `js/scene.js`, `js/dressing.js` | the 3D town: ground, buildings, lamps, neon signs, rooftops |
@@ -84,7 +98,7 @@ another network or Wi-Fi.
 | `js/audio.js` | engine, sirens, music and effects, all synthesised (no sound files) |
 | `js/net.js` | room codes and browser-to-browser connections |
 | `data/map.json` | the town of Jugnupur: roads, places to rob, hiding spots, hand-off points |
-| `data/map-hotaru.json` | a second town, Hotaru-cho (Japan). Open the game with `?map=hotaru` on the address to play it; there is no map picker in the menu yet |
+| `data/map-hotaru.json` | a second town, Hotaru-cho (Japan). Pick it with the **Town** button on the menu or in a room |
 | `vendor/` | [three.js](https://threejs.org) r160 (with its post-processing add-ons) and [PeerJS](https://peerjs.com) 1.5.4, both MIT licensed |
 | `tools/check-world.mjs` | `node tools/check-world.mjs` checks every place on the map can be driven to (`node tools/check-world.mjs hotaru` for the second town) |
 | `tools/stamp.mjs` | `node tools/stamp.mjs 3` after changing the game's code, so browsers fetch the new files together |

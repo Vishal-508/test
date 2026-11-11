@@ -12,7 +12,7 @@
 import * as THREE from '../vendor/three.module.min.js';
 
 const TAU = Math.PI * 2;
-const NONE = { update() {}, dispose() {} };
+const NONE = { update() {}, dispose() {}, setNight() {} };
 
 // True when this device can draw Japanese lettering (otherwise the signs use Latin letters).
 let KANA = null;
@@ -62,7 +62,10 @@ export function buildAmbient(scene, W, map, ctx) {
   const group = new THREE.Group(); group.name = 'ambient'; scene.add(group);
   const own = [], ticks = [];
   const keep = o => { own.push(o); return o; };
-  const bas = (color, extra) => keep(new THREE.MeshBasicMaterial(Object.assign({ color }, extra || {})));
+  // anything that gives off light is remembered, so a power cut can put it out
+  const glows = []; let power = 1;
+  const bas = (color, extra) => { const m = keep(new THREE.MeshBasicMaterial(Object.assign({ color }, extra || {}))); if (extra && extra.toneMapped === false) glows.push({ m, base: m.color.clone() }); return m; };
+  const nightHooks = [];
   const lam = (color, extra) => keep(new THREE.MeshLambertMaterial(Object.assign({ color }, extra || {})));
   const tintLam = () => lam(0xffffff, { vertexColors: true });
   const put = (geo, mat) => { const m = new THREE.Mesh(keep(geo), mat); m.frustumCulled = false; group.add(m); return m; };
@@ -138,9 +141,9 @@ export function buildAmbient(scene, W, map, ctx) {
     g.setAttribute('aA', new THREE.Float32BufferAttribute(ca, 3)); g.setAttribute('aB', new THREE.Float32BufferAttribute(cb, 3)); g.setAttribute('aSeed', new THREE.Float32BufferAttribute(seed, 1));
     g.setIndex(idx);
     const mat = keep(new THREE.ShaderMaterial({
-      uniforms: { uTime: { value: 0 } },
+      uniforms: { uTime: { value: 0 }, uPow: { value: 1 } },
       vertexShader: 'attribute vec3 aA; attribute vec3 aB; attribute float aSeed; varying vec2 vUv; varying vec3 vA; varying vec3 vB; varying float vSeed; void main(){ vUv = uv; vA = aA; vB = aB; vSeed = aSeed; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
-      fragmentShader: `varying vec2 vUv; varying vec3 vA; varying vec3 vB; varying float vSeed; uniform float uTime;
+      fragmentShader: `varying vec2 vUv; varying vec3 vA; varying vec3 vB; varying float vSeed; uniform float uTime; uniform float uPow;
         float h(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
         void main(){
           float sd = floor(vSeed * 10.0 + 0.5) / 10.0, t = uTime + sd * 3.0, scene = floor(t / 4.0);
@@ -152,12 +155,15 @@ export function buildAmbient(scene, W, map, ctx) {
           float ticker = step(uv.y, 0.16) * step(0.5, fract(uv.x * 14.0 + t * 1.2));
           c = mix(c, vec3(1.0), ticker * 0.8);
           c *= 0.82 + 0.18 * sin(uv.y * 220.0);
-          gl_FragColor = vec4(c * 1.25, 1.0);
+          gl_FragColor = vec4(c * 1.25 * uPow, 1.0);
+          #include <tonemapping_fragment>
+          #include <colorspace_fragment>
         }`,
       side: THREE.DoubleSide,
     }));
     put(g, mat); put(mergeBoxes(frames), lam(0x15171d));
     ticks.push((dt, t) => { mat.uniforms.uTime.value = t; });
+    nightHooks.push(() => { mat.uniforms.uPow.value = power < 0.5 ? 0.02 : 1; });
   }
 
   // ---------------------------------------------------------------- utility poles and the wires between them
@@ -245,10 +251,10 @@ export function buildAmbient(scene, W, map, ctx) {
       const ph = t % 18;   // 0-7 group 0 drives, 7-8 amber, 8-9 everyone waits, 9-16 group 1 drives, 16-17 amber, 17-18 wait
       for (const grp of [0, 1]) {
         const mine = grp === 0 ? ph : (ph + 9) % 18, state = mine < 7 ? 'g' : mine < 8 ? 'a' : 'r';
-        for (const k of ['r', 'a', 'g']) if (lamps[grp][k]) lamps[grp][k].color.setHex(k === state ? lit[k] : dim[k]);
+        for (const k of ['r', 'a', 'g']) if (lamps[grp][k]) lamps[grp][k].color.setHex(k === state && power > 0.5 ? lit[k] : dim[k]);
         const walk = state === 'r' && ((mine >= 9 && mine < 15.5) || (mine >= 15.5 && mine < 17 && Math.sin(t * 14) > 0));   // people go while the cars on this arm wait; it blinks before changing
-        if (peds[grp].g) peds[grp].g.color.setHex(walk ? lit.g : dim.g);
-        if (peds[grp].r) peds[grp].r.color.setHex(walk ? dim.r : lit.r);
+        if (peds[grp].g) peds[grp].g.color.setHex(walk && power > 0.5 ? lit.g : dim.g);
+        if (peds[grp].r) peds[grp].r.color.setHex(walk || power < 0.5 ? dim.r : lit.r);
       }
     });
   }
@@ -299,7 +305,7 @@ export function buildAmbient(scene, W, map, ctx) {
     const span = cars * (len + 0.14) / 2 + 6, period = T.every || 26, speed = T.speed || 9;
     ticks.push((dt, t) => {
       const n = Math.floor(t / period), f = t - n * period, dir = n % 2 ? -1 : 1, run = (100 + span * 2) / speed;
-      if (f > run) { tg.visible = false; return; }
+      if (f > run || power < 0.5) { tg.visible = false; return; }   // no trains in a power cut
       tg.visible = true;
       tg.position.set(dir > 0 ? -span + f * speed : 100 + span - f * speed, T.h || 0, T.y); head.position.set(dir * (cars * (len + 0.14) / 2 - 0.05), 0.42, 0);
     });
@@ -406,7 +412,7 @@ export function buildAmbient(scene, W, map, ctx) {
   if (A.blink && A.blink.length) {
     const im = inst(new THREE.SphereGeometry(0.09, 8, 6), bas(0xffffff, { toneMapped: false }), A.blink.length);
     const base = A.blink.map((b, i) => { const s = (b.r || 0.09) / 0.09; setAt(im, i, b.x, b.h, b.y, 0, s, s, s); im.setColorAt(i, col.setHex(b.color || 0xff4136)); return { c: new THREE.Color(b.color || 0xff4136), ph: b.ph || 0, rate: b.rate || 1 }; });
-    ticks.push((dt, t) => { base.forEach((m, i) => { const on = ((t * m.rate + m.ph) % 1.6) < 0.8; im.setColorAt(i, col.copy(m.c).multiplyScalar(on ? 1.4 : 0.12)); }); im.instanceColor.needsUpdate = true; });
+    ticks.push((dt, t) => { base.forEach((m, i) => { const on = ((t * m.rate + m.ph) % 1.6) < 0.8; im.setColorAt(i, col.copy(m.c).multiplyScalar(on && power > 0.5 ? 1.4 : 0.12)); }); im.instanceColor.needsUpdate = true; });
   }
 
   // ---------------------------------------------------------------- spotlights sweeping the sky over the club district
@@ -440,14 +446,14 @@ export function buildAmbient(scene, W, map, ctx) {
   if (A.sky && ctx && ctx.camera) {
     const K = A.sky, moon = new THREE.Vector3(K.moon ? K.moon[0] : 0.25, K.moon ? K.moon[1] : 0.14, K.moon ? K.moon[2] : 0.95).normalize();
     const mat = keep(new THREE.ShaderMaterial({
-      uniforms: { uTime: { value: 0 }, uMoon: { value: moon }, uPeak: { value: K.peak != null ? K.peak : -1.5708 }, uHasPeak: { value: K.peak != null ? 1 : 0 } },
+      uniforms: { uTime: { value: 0 }, uMoon: { value: moon }, uPeak: { value: K.peak != null ? K.peak : -1.5708 }, uHasPeak: { value: K.peak != null ? 1 : 0 }, uPow: { value: 1 }, uMist: { value: 0 }, uMistCol: { value: new THREE.Color(0x39414f) } },
       vertexShader: 'varying vec3 vDir; void main(){ vDir = position; vec4 p = projectionMatrix * modelViewMatrix * vec4(position, 1.0); gl_Position = p.xyww; }',
-      fragmentShader: `varying vec3 vDir; uniform float uTime; uniform vec3 uMoon; uniform float uPeak; uniform float uHasPeak;
+      fragmentShader: `varying vec3 vDir; uniform float uTime; uniform vec3 uMoon; uniform float uPeak; uniform float uHasPeak; uniform float uPow; uniform float uMist; uniform vec3 uMistCol;
         float h1(float n){ return fract(sin(n * 127.1) * 43758.5453); }
         float h2(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
         void main(){
           vec3 d = normalize(vDir); float el = asin(clamp(d.y, -1.0, 1.0)), az = atan(d.x, d.z);
-          vec3 zen = vec3(0.010, 0.016, 0.045), mid = vec3(0.045, 0.04, 0.11), hor = vec3(0.30, 0.12, 0.24);
+          vec3 zen = vec3(0.010, 0.016, 0.045), mid = vec3(0.045, 0.04, 0.11), hor = vec3(0.30, 0.12, 0.24) * mix(0.3, 1.0, uPow);   // the glow on the horizon is the city's own light
           vec3 c = mix(hor, mid, smoothstep(0.0, 0.2, el)); c = mix(c, zen, smoothstep(0.14, 0.7, el));
           c = mix(c, vec3(0.03, 0.035, 0.07), smoothstep(0.0, -0.06, el));
           // stars
@@ -472,21 +478,31 @@ export function buildAmbient(scene, W, map, ctx) {
             vec3 b = vec3(0.016, 0.02, 0.042);
             vec2 wg = vec2(floor(cf * 4.0), floor(el * 700.0));
             float wl = step(0.62, h2(wg + col * 13.0)) * step(0.2, fract(cf * 4.0)) * step(0.3, fract(el * 700.0));
-            b += mix(vec3(1.0, 0.8, 0.5), vec3(0.7, 0.85, 1.0), step(0.8, h2(wg + 5.0))) * wl * 0.55;
+            b += mix(vec3(1.0, 0.8, 0.5), vec3(0.7, 0.85, 1.0), step(0.8, h2(wg + 5.0))) * wl * 0.55 * uPow;
             float tip = step(0.07, bh) * step(bh - 0.004, el) * step(0.4, cf) * step(cf, 0.6) * step(0.0, sin(uTime * 3.0 + col));
-            b += vec3(1.0, 0.15, 0.1) * tip * 1.5;
+            b += vec3(1.0, 0.15, 0.1) * tip * 1.5 * uPow;
             c = b;
           }
+          c = mix(c, uMistCol, uMist * smoothstep(0.55, 0.0, el));   // fog swallows the horizon and thins overhead
           gl_FragColor = vec4(c, 1.0);
+          #include <tonemapping_fragment>
+          #include <colorspace_fragment>
         }`,
       side: THREE.BackSide, depthWrite: false, depthTest: true, fog: false,
     }));
     const dome = put(new THREE.SphereGeometry(200, 48, 24), mat); dome.renderOrder = -20;
     ticks.push((dt, t) => { dome.position.copy(ctx.camera.position); mat.uniforms.uTime.value = t; });
+    nightHooks.push(n => { mat.uniforms.uPow.value = power; mat.uniforms.uMist.value = n.mist || 0; if (n.mistColor != null) mat.uniforms.uMistCol.value.setHex(n.mistColor); });
   }
 
   return {
     update(dt, time, focus, fx) { for (const f of ticks) f(dt, time, focus, fx); },
+    // How tonight differs: power 1 normally and near 0 in a power cut; mist 0 to 1 with its colour on a foggy night.
+    setNight(n) {
+      n = n || {}; power = n.power != null ? n.power : 1;
+      for (const g of glows) g.m.color.copy(g.base).multiplyScalar(power);
+      for (const f of nightHooks) f(n);
+    },
     dispose() { scene.remove(group); for (const o of own) if (o && o.dispose) o.dispose(); },
   };
 }

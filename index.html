@@ -53,6 +53,8 @@ kbd{font-family:ui-monospace,Menlo,monospace;font-size:.82em;background:#1b2540;
 .tag.chor{background:rgba(243,180,63,.16);color:var(--loot);border:1px solid rgba(243,180,63,.5)}
 .tag.police{background:rgba(106,152,255,.16);color:var(--police);border:1px solid rgba(106,152,255,.5)}
 .small{font-size:.9rem;color:var(--muted)}
+.lvl{display:flex;gap:10px;align-items:center} .lvl button{flex:0 0 52px;font-size:1.2rem;padding:.3em 0} #optLevel{flex:1;text-align:center;font-family:var(--display);font-weight:800;font-size:1.05rem;color:var(--loot)}
+#seriesLine:empty,#pauseTonight:empty{display:none} #hostNote{text-transform:none;letter-spacing:0}
 .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:10px}
 .stats div{background:#0d1426;border:1px solid var(--line);border-radius:10px;padding:10px 12px}
 .stats b{display:block;font-family:var(--display);font-size:1.3rem}
@@ -199,6 +201,7 @@ body.touch #prompt{bottom:calc(214px + var(--sab))}
         <div id="paints" role="radiogroup" aria-label="Car paint"></div>
       </div>
     </div>
+    <button id="btnTown" class="ghost">Town: Jugnupur</button>
     <button id="btnSolo" class="primary">Play solo · Night 1</button>
     <div class="row">
       <button id="btnCreate" class="blue">Create room</button>
@@ -239,7 +242,12 @@ body.touch #prompt{bottom:calc(214px + var(--sab))}
     <ul class="plist" id="plist"></ul>
     <div class="label">Your side</div>
     <div class="row"><button id="btnRoleChor" class="primary">Chor</button><button id="btnRolePolice" class="blue">Police</button></div>
+    <div class="label">Tonight <span id="hostNote">· the host chooses</span></div>
+    <div class="row opts"><button id="optTown" class="ghost">Town: Jugnupur</button><button id="btnShuffle" class="ghost">Shuffle sides</button></div>
+    <div class="lvl"><button id="optLevelDown" class="ghost" aria-label="Lower the level">−</button><div id="optLevel">Level 3 · Theek-thaak</div><button id="optLevelUp" class="ghost" aria-label="Raise the level">+</button></div>
+    <div class="row opts"><button id="optSurprise" class="ghost">Surprises: on</button><button id="optAuto" class="ghost" title="When the chors win, the next round is one level harder">Auto level-up: on</button></div>
     <p class="small" id="lobbyInfo"></p>
+    <p class="small" id="seriesLine"></p>
     <div class="row"><button id="btnStart" class="primary">Start round</button><button id="btnLeave" class="ghost">Leave</button></div>
     <div class="err" id="lobbyErr"></div>
   </div>
@@ -249,6 +257,7 @@ body.touch #prompt{bottom:calc(214px + var(--sab))}
   <div class="card">
     <h2>Paused</h2>
     <p class="small" id="pauseNote">The round keeps running while this menu is open.</p>
+    <p class="small" id="pauseTonight" style="color:var(--loot)"></p>
     <div class="row opts"><button id="btnQuality2" class="ghost">Graphics: Auto</button><button id="btnMusic2" class="ghost">Music: on</button></div>
     <div class="row opts"><button id="btnCam" class="ghost">View: High</button></div>
     <div class="row"><button id="btnResume" class="primary">Back to the game</button><button id="btnQuit">Leave round</button></div>
@@ -270,6 +279,6 @@ body.touch #prompt{bottom:calc(214px + var(--sab))}
 <noscript><div style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#0a0f1d;color:#e9eef8;z-index:99;padding:20px;text-align:center">Chor Police needs JavaScript. Please turn it on in your browser and reload.</div></noscript>
 <div id="loading">Building Jugnupur…</div>
 <script src="vendor/peerjs.min.js"></script>
-<script type="module" src="js/game.js?v=4"></script>
+<script type="module" src="js/game.js?v=5"></script>
 </body>
 </html>

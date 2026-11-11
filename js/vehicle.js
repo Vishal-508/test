@@ -1,7 +1,7 @@
 // Arcade car handling shared by players and computer police: throttle, steering, handbrake drift, nitro,
 // collisions against the town grid and other cars, and a path-following driver for the computer.
 // Headings: angle a means the car points along (sin a, cos a) on the map (x east, y south).
-import { CS } from './world.js?v=4';
+import { CS } from './world.js?v=5';
 
 // vmax top speed, acc engine pull, tA/tB steering curve: turn rate = steer x min(v / tA, tB / v) rad/s
 export const CAR = {
@@ -100,7 +100,7 @@ export function stepVehicle(v, inp, dt, env) {
   vf = v.vx * fx + v.vy * fy; vr = v.vx * fy - v.vy * fx;
   v.gr += clamp((hb && sp >= 1.2 ? 0 : 1) - v.gr, -dt / 0.08, dt / 0.25);
   const slip = Math.abs(vr);
-  vr *= Math.exp(-(P.gripHb + (P.grip - P.gripHb) * v.gr) * dt);
+  vr *= Math.exp(-(P.gripHb + (P.grip - P.gripHb) * v.gr) * (env.gripMul || 1) * dt);   // gripMul below 1: a wet road
   // drift charge: hold a real slide and it pays out speed and nitro when you straighten up
   v.boost = 0;
   if (slip > 0.36 * Math.max(0.5, Math.abs(vf)) && Math.hypot(vf, vr) > 1.6) v.charge += dt;
