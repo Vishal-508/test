@@ -408,7 +408,8 @@ export function buildScene(scene, map, W, U, quality) {
 
   // park trees
   const trunks = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.09, 0.12, 0.6, 6), lam(0x4a3626), W.trees.length);
-  const crowns = new THREE.InstancedMesh(new THREE.ConeGeometry(0.62, 1.5, 7), cutMat(0x1e5a32), W.trees.length);
+  const TR = W.layout.trees || {};   // a map may ask for round blossom trees instead of dark conifers
+  const crowns = new THREE.InstancedMesh(TR.round ? new THREE.IcosahedronGeometry(0.78, 1) : new THREE.ConeGeometry(0.62, 1.5, 7), cutMat(TR.color != null ? TR.color : 0x1e5a32), W.trees.length);
   W.trees.forEach((t, k) => {
     dummy.position.set(t.x, 0.3, t.y); dummy.scale.set(1, 1, 1); dummy.updateMatrix(); trunks.setMatrixAt(k, dummy.matrix);
     dummy.position.set(t.x, 0.6 + 0.75 * t.s, t.y); dummy.scale.set(t.s, t.s, t.s); dummy.updateMatrix(); crowns.setMatrixAt(k, dummy.matrix);

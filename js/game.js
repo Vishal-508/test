@@ -7,6 +7,7 @@ import { makeVehicle, stepVehicle, makeDriver, drive, CAR } from './vehicle.js?v
 import { makeCar, PAINTS } from './cars.js?v=4';
 import { Fx } from './fx.js?v=4';
 import { buildDressing } from './dressing.js?v=4';
+import { buildAmbient } from './ambient.js?v=4';
 import { makePost } from './postfx.js?v=4';
 import { initAudio, setMuted, isMuted, setMusicOn, isMusicOn, engine, skid, siren, heartbeat, rain, music, sfx } from './audio.js?v=4';
 import { HostNet, ClientNet, cleanCode } from './net.js?v=4';
@@ -60,7 +61,7 @@ const arrowShape = new THREE.Shape(); arrowShape.moveTo(0, 0.5); arrowShape.line
 const arrow = new THREE.Mesh(new THREE.ShapeGeometry(arrowShape), new THREE.MeshBasicMaterial({ color: COLORS.loot, transparent: true, opacity: 0.95, depthTest: false, side: THREE.DoubleSide }));
 arrow.rotation.order = 'YXZ'; arrow.rotation.x = Math.PI / 2; arrow.position.y = 0.07; arrow.renderOrder = 15; arrow.visible = false; scene.add(arrow);
 
-let W = null, H = null, miniBase = null, fx = null, dressing = null;
+let W = null, H = null, miniBase = null, fx = null, dressing = null, ambient = null;
 
 // ------------------------------------------------------------------ state
 const S = {
@@ -1329,6 +1330,7 @@ function frame(now) {
   updateCamera(dt, time); updateLights(dt, time); updateLabels();
   fx.update(dt, time, focusPt.set(S.cam.tgt.x, S.cam.tgt.z));
   dressing.update(dt, time);
+  ambient.update(dt, time, focusPt, fx);
   post.render(dt);
   // if a phone cannot keep up, quietly drop the expensive effects once
   if (save.quality === 'auto' && playing && !S.dropped) { S.lowFps = fpsAvg < 22 ? S.lowFps + dt : 0; if (S.lowFps > 4) { S.dropped = true; post.setEnabled(false); fx.setQuality('low'); pixelCap = 1; renderer.setPixelRatio(1); resize(); toast('Graphics lowered for smoother driving.'); } }
@@ -1348,6 +1350,7 @@ async function boot() {
   H = buildScene(scene, map, W, U, { ground: high ? 2048 : 1024, aniso: Math.min(8, renderer.capabilities.getMaxAnisotropy()), wet: high, cones: true });
   fx = new Fx(scene, { quality: high ? 'high' : 'low' });
   dressing = buildDressing(scene, W, { hash2, U, vocab: map.signs || null });
+  ambient = buildAmbient(scene, W, map, { hash2 });
   miniBase = document.createElement('canvas'); miniBase.width = miniBase.height = 500; paintMini(miniBase, map, W);
   setMuted(!!save.muted); setMusicOn(save.music !== false);
   if (!PAINTS.some(p => p.id === save.paint)) save.paint = PAINTS[0].id;
