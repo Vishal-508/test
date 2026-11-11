@@ -17,6 +17,7 @@ const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 const r2 = v => Math.round(v * 100) / 100;
 let CUR = '₹';   // the map file may name another currency sign
+let MAP_ID = '';  // which town this page loaded ('' is Jugnupur); everyone in a room must be in the same one
 const money = n => CUR + Math.round(n).toLocaleString('en-IN');
 const TAU = Math.PI * 2;
 const wrap = a => (Number.isFinite(a) ? a - TAU * Math.floor((a + Math.PI) / TAU) : 0);   // into -PI..PI without looping, whatever comes in
@@ -53,7 +54,7 @@ const hemi = new THREE.HemisphereLight(0x8d93ab, 0x4c4850, HEMI); scene.add(hemi
 const moon = new THREE.DirectionalLight(0xc6ceff, MOON); moon.position.set(-30, 40, 45); scene.add(moon);
 const headlamp = new THREE.SpotLight(0xfff1d0, 0, 13, 0.56, 0.85, 1.0); scene.add(headlamp); scene.add(headlamp.target);
 const sirenRed = new THREE.PointLight(0xff2a2a, 0, 9, 1.4), sirenBlue = new THREE.PointLight(0x2a5cff, 0, 9, 1.4); scene.add(sirenRed); scene.add(sirenBlue);
-const U = { uCut: { value: new THREE.Vector3(0.5, 0.5, -1) }, uRes: { value: new THREE.Vector2(1, 1) } };
+const U = { uCut: { value: new THREE.Vector3(0.5, 0.5, -1) }, uRes: { value: new THREE.Vector2(1, 1) }, uTime: { value: 0 } };
 const dyn = new THREE.Group(); scene.add(dyn);
 const post = makePost(renderer, scene, camera);
 
@@ -801,7 +802,10 @@ function syncEntities(dt, time) {
     if (hv.closed !== want) { const was = hv.closed; hv.closed = clamp(hv.closed + Math.sign(want - hv.closed) * dt / 0.3, 0, 1); hv.ho.setClosed(hv.closed); if (want === 1 && was < 0.5 && hv.closed >= 0.5 && me && dist(me.v, W.hides[i]) < 14) sfx.shutter(); }
     const lv = S.searchLv[i] || 0;
     if (hv.search !== lv) { hv.search = lv; hv.ho.setSearch(lv); }
-    hv.ho.update(dt, time);
+    // a hideout far off in the haze is not drawn at all (each one is several objects, and from street level dozens are in view)
+    const near = Math.hypot(camera.position.x - W.hides[i].x, camera.position.z - W.hides[i].y) < Math.min(36, scene.fog.far * 0.6);
+    if (hv.ho.g.visible !== near) hv.ho.g.visible = near;
+    if (near) hv.ho.update(dt, time);
   }
 }
 function updateLights(dt, time) {
@@ -894,6 +898,7 @@ function updateLabels() {
     // from street level only the name tags of places nearby show, or the whole town's would pile up along the horizon
     const reach = street ? (sp.userData.far ? 30 : 13) : 1e9;
     sp.scale.set(s * sp.userData.ratio, s, 1); sp.material.opacity = clamp((d - 2.6) / 2.5, 0, 1) * clamp((reach - d) / 4, 0, 1) * (S.cam.hide > 0.5 ? 0 : 1);
+    sp.material.visible = sp.material.opacity > 0.01;   // a name tag that has faded out is not drawn
   }
 }
 function updateWorldVisuals(time) {
@@ -1151,7 +1156,7 @@ function heartbeatNet() {
     if (S.hostHeard && now - S.hostHeard > 15000) toMenu('Lost the connection to the host.');
   }
 }
-function broadcastLobby() { if (!S.net || !S.isHost) return; for (const p of S.lobby.players) if (p.id !== 'h') S.net.send(p.id, { k: 'lobby', you: p.id, code: S.lobby.code, players: S.lobby.players }); renderLobby(); }
+function broadcastLobby() { if (!S.net || !S.isHost) return; for (const p of S.lobby.players) if (p.id !== 'h') S.net.send(p.id, { k: 'lobby', you: p.id, code: S.lobby.code, players: S.lobby.players, map: MAP_ID }); renderLobby(); }
 async function createRoom() {
   initAudio(); $('menuErr').textContent = 'Creating a room…'; $('btnCreate').disabled = true;
   save.name = myName(); storeSave(); leaveNet();
@@ -1198,6 +1203,10 @@ async function joinRoom() {
       S.hostHeard = performance.now();
       if (m.k === 'hb') return;
       if (m.k === 'bye') { toMenu('The host closed the room.'); return; }
+      if (m.k === 'lobby' && String(m.map || '') !== MAP_ID) { // the host is in another town: load that one and come straight back to the room
+        const town = String(m.map || '').replace(/[^a-z0-9-]/g, '').slice(0, 24), code = cleanCode(m.code);
+        leaveNet(); location.replace(location.pathname + '?' + (town ? 'map=' + town + '&' : '') + 'room=' + code + '&go=1'); return;
+      }
       if (m.k === 'lobby') { S.myId = m.you; S.lobby = { code: m.code, players: m.players }; if (S.screen !== 'lobby') { clearDyn(); setScreen('lobby'); } renderLobby(); }
       else if (m.k === 'start') beginMatch(m);
       else if (m.k === 's') applySnapshot(m);
@@ -1236,6 +1245,8 @@ function bindUi() {
   $('name').value = save.name || '';
   const q = new URLSearchParams(location.search), room = cleanCode(q.get('room'));
   if (room.length === 4) { $('code').value = room; $('joinBox').hidden = false; }
+  // sent here by a room whose host is in this town: carry on into the room without asking again
+  if (room.length === 4 && q.get('go') === '1') { if (save.name) $('name').value = save.name; setTimeout(() => { if (S.screen === 'menu' && !S.net) joinRoom(); }, 300); }
   $('btnSolo').onclick = () => { sfx.click(); startSolo(); };
   $('btnCreate').onclick = () => createRoom();
   $('btnJoinOpen').onclick = () => { $('joinBox').hidden = !$('joinBox').hidden; if (!$('joinBox').hidden) $('code').focus(); };
@@ -1245,7 +1256,7 @@ function bindUi() {
   $('btnStart').onclick = () => hostStart();
   $('btnLeave').onclick = () => toMenu('');
   $('btnCopy').onclick = async () => {
-    const link = location.origin + location.pathname + '?room=' + S.lobby.code;
+    const link = location.origin + location.pathname + '?' + (MAP_ID ? 'map=' + MAP_ID + '&' : '') + 'room=' + S.lobby.code;
     try { await navigator.clipboard.writeText(link); toast('Invite link copied. Send it to your friends.'); } catch (e) { toast('Tell your friends the code: ' + S.lobby.code); }
   };
   $('btnPause').onclick = () => togglePause();
@@ -1364,7 +1375,7 @@ function frame(now) {
   updateCamera(dt, time); updateLights(dt, time); updateLabels();
   fx.update(dt, time, focusPt.set(S.cam.tgt.x, S.cam.tgt.z));
   dressing.update(dt, time);
-  ambient.update(dt, time, focusPt, fx);
+  ambient.update(dt, time, focusPt, fx); U.uTime.value = time % 3600;
   post.render(dt);
   // if a phone cannot keep up, quietly drop the expensive effects once
   if (save.quality === 'auto' && playing && !S.dropped) { S.lowFps = fpsAvg < 22 ? S.lowFps + dt : 0; if (S.lowFps > 4) { S.dropped = true; post.setEnabled(false); fx.setQuality('low'); pixelCap = 1; renderer.setPixelRatio(1); resize(); toast('Graphics lowered for smoother driving.'); } }
@@ -1376,6 +1387,7 @@ async function boot() {
   const mapId = (new URLSearchParams(location.search).get('map') || '').toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 24);
   let map = null;
   if (mapId) { try { const r = await fetch('data/map-' + mapId + '.json'); if (r.ok) map = await r.json(); } catch (e) { map = null; } }
+  if (map) MAP_ID = mapId;
   if (!map) map = await (await fetch('data/map.json')).json();
   if (typeof map.currency === 'string' && map.currency.length <= 3) CUR = map.currency;
   try { await Promise.race([Promise.all([document.fonts.load('700 46px "Baloo 2"'), document.fonts.load('600 16px "Hind"')]), new Promise(r => setTimeout(r, 1800))]); } catch (e) { /* fall back to system fonts */ }
@@ -1396,6 +1408,6 @@ async function boot() {
   setInterval(hostLoop, 33); setInterval(heartbeatNet, 2000);
   window.addEventListener('pagehide', () => { if (S.net && !S.solo) { try { if (S.isHost) S.net.broadcast({ k: 'bye' }); else S.net.send({ k: 'bye' }); } catch (e) {} } });
   requestAnimationFrame(frame);
-  window.__cp = { S, W, CFG, In, doAction, hostTick, startSolo, save, camera, renderer, post, drive, makeDriver, stepVehicle, fps: () => fpsAvg }; // handy for testing in the console
+  window.__cp = { S, W, CFG, In, scene, doAction, hostTick, startSolo, save, camera, renderer, post, drive, makeDriver, stepVehicle, fps: () => fpsAvg }; // handy for testing in the console
 }
 boot().catch(err => { console.error(err); $('loading').textContent = 'Could not start the game: ' + err.message; });

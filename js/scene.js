@@ -4,8 +4,7 @@ import * as THREE from '../vendor/three.module.min.js';
 import { N, CS, T, LANE, hash2 } from './world.js?v=4';
 import { buildHideout, kindFor } from './hideouts.js?v=4';
 import { CFG } from './config.js?v=4';
-import { makeCar } from './cars.js?v=4';
-import { canDrawKana } from './ambient.js?v=4';
+import { canDrawKana, mergeBoxes } from './ambient.js?v=4';
 
 const FONT = '"Baloo 2","Trebuchet MS","Segoe UI",sans-serif';
 
@@ -326,7 +325,10 @@ const FRONTS = `
                   float bandC = step( fyC, 0.27 ) * step( 0.03, fyC );
                   float chC = step( 0.42, hsC( vec2( floor( uC * 5.5 ), flC + sideC ) ) ) * step( 0.08, fyC ) * step( fyC, 0.22 ) * step( 0.12, fract( uC * 5.5 ) );
                   diffuseColor.rgb = mix( baseC, vec3( 0.07, 0.07, 0.09 ), bandC );
-                  totalEmissiveRadiance += sgnC * bandC * hasC * ( 0.16 + 0.8 * chC );
+                  // most signs burn steadily; some blink, some have a gap that runs along them, a few have a failing tube
+                  float blC = hsC( vec2( flC + 11.0, bidC * 53.0 + sideC ) );
+                  float onC = blC < 0.1 ? step( -0.2, sin( uTime * 2.2 + blC * 90.0 ) ) : blC < 0.2 ? 0.25 + 0.75 * step( 0.22, fract( uC * 0.9 - uTime * 0.8 ) ) : blC < 0.24 ? 0.15 + 0.85 * step( 0.12, fract( sin( floor( uTime * 9.0 ) + blC * 40.0 ) * 43758.5 ) ) : 1.0;
+                  totalEmissiveRadiance += sgnC * bandC * hasC * ( 0.16 + 0.8 * chC ) * onC;
                   float wC = step( 0.36, fyC ) * step( fyC, 0.9 ) * step( 0.1, bxC ) * step( bxC, 0.9 );
                   float paneC = 1.0 - 0.8 * clamp( step( abs( bxC - 0.5 ), 0.014 ) + step( abs( bxC - 0.3 ), 0.01 ) + step( abs( bxC - 0.7 ), 0.01 ), 0.0, 1.0 );
                   float litC = step( 0.45, rC );
@@ -377,7 +379,7 @@ const FRONTS = `
 export function makeBuildingMaterial(U, windows) {
   const mat = new THREE.MeshLambertMaterial({ color: 0xffffff });
   mat.onBeforeCompile = sh => {
-    sh.uniforms.uCut = U.uCut; sh.uniforms.uRes = U.uRes;
+    sh.uniforms.uCut = U.uCut; sh.uniforms.uRes = U.uRes; sh.uniforms.uTime = U.uTime || { value: 0 };
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nattribute float aSty;\nvarying vec3 vWPos;\nvarying vec3 vONormal;\nvarying float vDepthC;\nvarying vec4 vRoof;\nvarying float vSty;\nvarying float vBh;\nvarying float vBid;')
       .replace('#include <project_vertex>', `#include <project_vertex>
@@ -396,7 +398,7 @@ export function makeBuildingMaterial(U, windows) {
         vONormal = normal;
         vDepthC = - mvPosition.z;`);
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying vec3 vWPos;\nvarying vec3 vONormal;\nvarying float vDepthC;\nvarying vec4 vRoof;\nvarying float vSty;\nvarying float vBh;\nvarying float vBid;\nuniform vec3 uCut;\nuniform vec2 uRes;\nfloat hsC( vec2 p ) { return fract( sin( dot( p, vec2( 12.9898, 78.233 ) ) ) * 43758.5453 ); }\nfloat lodC( float freq, float depth ) { return clamp( 2.0 - depth * freq / 70.0, 0.0, 1.0 ); }\nfloat strC( float x, float freq, float duty, float depth ) { return mix( 1.0 - duty, step( duty, fract( x * freq ) ), lodC( freq, depth ) ); }')
+      .replace('#include <common>', '#include <common>\nvarying vec3 vWPos;\nvarying vec3 vONormal;\nvarying float vDepthC;\nvarying vec4 vRoof;\nvarying float vSty;\nvarying float vBh;\nvarying float vBid;\nuniform vec3 uCut;\nuniform vec2 uRes;\nuniform float uTime;\nfloat hsC( vec2 p ) { return fract( sin( dot( p, vec2( 12.9898, 78.233 ) ) ) * 43758.5453 ); }\nfloat lodC( float freq, float depth ) { return clamp( 2.0 - depth * freq / 70.0, 0.0, 1.0 ); }\nfloat strC( float x, float freq, float duty, float depth ) { return mix( 1.0 - duty, step( duty, fract( x * freq ) ), lodC( freq, depth ) ); }')
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
         {
           vec2 spC = gl_FragCoord.xy / uRes;
@@ -447,7 +449,7 @@ ${FRONTS}
           }
         }`);
   };
-  mat.customProgramCacheKey = () => 'bldg6' + (windows ? 1 : 0);
+  mat.customProgramCacheKey = () => 'bldg7' + (windows ? 1 : 0);
   return mat;
 }
 
@@ -512,14 +514,16 @@ export function buildScene(scene, map, W, U, quality) {
   // landmark footprints: merge marked cells into boxes
   const cellBoxes = (r, hFn, mat) => {
     const i0 = Math.floor(r.x0 / CS), i1 = Math.ceil(r.x1 / CS), j0 = Math.floor(r.y0 / CS), j1 = Math.ceil(r.y1 / CS);
+    const parts = [];
     for (let j = j0; j < j1; j++) {
       let run = -1;
       for (let i = i0; i <= i1; i++) {
         const on = i < i1 && W.type[j * N + i] === T.MARK && (i + 0.5) * CS >= r.x0 && (i + 0.5) * CS <= r.x1 && (j + 0.5) * CS >= r.y0 && (j + 0.5) * CS <= r.y1;
         if (on && run < 0) run = i;
-        if (!on && run >= 0) { const w = (i - run) * CS, h = hFn(run, j); box(w, h, CS, mat, run * CS + w / 2, h / 2, j * CS + CS / 2); run = -1; }
+        if (!on && run >= 0) { const w = (i - run) * CS, h = hFn(run, j); parts.push([w, h, CS, run * CS + w / 2, h / 2, j * CS + CS / 2]); run = -1; }
       }
     }
+    if (parts.length) scene.add(new THREE.Mesh(mergeBoxes(parts), mat));   // one mesh per footprint
   };
   const M = W.marks, LY = W.layout, th = M.thana;
   // police station and its impound yard
@@ -623,18 +627,23 @@ export function buildScene(scene, map, W, U, quality) {
     }
   }
   // buses, wagon, mail coach
+  const parked = [];
   for (const p of W.solidProps) {
     const w = p.x1 - p.x0, d = p.y1 - p.y0, cx = (p.x0 + p.x1) / 2, cz = (p.y0 + p.y1) / 2;
     if (p.kind === 'bus') { box(w, 0.62, d, cutMat(p.c), cx, 0.39, cz); box(w * 0.92, 0.18, d + 0.02, bas(0x6f8796), cx, 0.5, cz); box(w * 0.96, 0.05, d * 0.9, lam(0xdedede), cx, 0.72, cz); }
     else if (p.kind === 'wagon') { box(w, 0.42, d, cutMat(p.c), cx, 0.33, cz); box(w * 0.94, 0.06, d * 0.8, lam(0x2a1a12), cx, 0.5, cz); }
     else if (p.kind === 'van') { box(w, 0.6, d, cutMat(p.c), cx, 0.4, cz); box(w * 0.3, 0.24, d + 0.02, bas(0x9fc4d8), cx + w * 0.3, 0.52, cz); box(w * 0.5, 0.1, d + 0.03, bas(0xf3b43f), cx - w * 0.15, 0.36, cz); }
-    else if (p.kind === 'car') { // a parked car: one of the game's own cars, switched off
-      const pc = makeCar('chor', { paint: p.c }); pc.g.position.set(cx, 0, cz); pc.g.rotation.y = (w >= d ? Math.PI / 2 : 0) + (p.flip ? Math.PI : 0); scene.add(pc.g);
-      pc.update({ speed: 0, steer: 0, brake: false, lights: false, siren: false, nitro: false, hidden: false, alpha: 1 }, 0.016, 0);
+    else if (p.kind === 'car') { // a parked car, kept simple: all of them together are one mesh
+      const ry = (w >= d ? Math.PI / 2 : 0) + (p.flip ? Math.PI : 0), cs = Math.cos(ry), sn = Math.sin(ry);
+      const part = (bw, bh, bd, ox, y, oz, c) => parked.push([bw, bh, bd, cx + ox * cs + oz * sn, y, cz - ox * sn + oz * cs, ry, c]);
+      part(0.38, 0.13, 0.84, 0, 0.13, 0, p.c); part(0.33, 0.11, 0.42, 0, 0.25, -0.04, p.c); part(0.335, 0.07, 0.43, 0, 0.255, -0.04, 0x12161c);
+      for (const sx of [-0.19, 0.19]) for (const sz of [-0.26, 0.26]) part(0.06, 0.12, 0.16, sx, 0.06, sz, 0x101114);
+      part(0.3, 0.03, 0.02, 0, 0.15, -0.42, 0x7a1010); part(0.3, 0.03, 0.02, 0, 0.15, 0.42, 0xd8d2b8);
     }
     else if (p.kind === 'crate') { box(w, p.h || 0.55, d, cutMat(p.c), cx, (p.h || 0.55) / 2, cz); }
     else { box(w, 0.7, d, cutMat(p.c), cx, 0.45, cz); box(w * 0.9, 0.16, d + 0.02, bas(0xffe9a8), cx, 0.55, cz); }
   }
+  if (parked.length) scene.add(new THREE.Mesh(mergeBoxes(parked), lam(0xffffff, { vertexColors: true })));
   const boat = W.escapes.find(e => /Naav/.test(e.name));
   if (boat) { const b = box(1.9, 0.22, 0.7, lam(0x6a4a30), boat.x + 0.2, 0.08, boat.y + 1.75); b.rotation.y = 0.15; box(0.05, 0.9, 0.05, lam(0x554433), boat.x + 0.2, 0.5, boat.y + 1.75); box(0.14, 0.14, 0.14, bas(0x7dffa8), boat.x + 0.2, 1.0, boat.y + 1.75); }
 

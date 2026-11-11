@@ -36,6 +36,7 @@ using a room code.
 | Headlights | `L` | **Lights** |
 | Horn | `H` | |
 | Big map | `M` | tap the radar |
+| Switch between street view and high view | `C` | **View** in the pause menu |
 | Put the car back on the road | hold `R` | happens by itself when stuck |
 
 Solo play is a ladder of nights: each win unlocks a harder night with more loot to bank, more jeeps and
@@ -77,13 +78,15 @@ another network or Wi-Fi.
 | `js/vehicle.js` | car handling (drift, nitro, crashes) and the computer driver |
 | `js/world.js` | turns the map into roads, buildings, hideout bays, sight lines and routes |
 | `js/scene.js`, `js/dressing.js` | the 3D town: ground, buildings, lamps, neon signs, rooftops |
+| `js/ambient.js` | what moves and glows in a town that asks for it: night sky, railway and train, video screens, vertical signs, traffic lights, blossom |
 | `js/cars.js`, `js/hideouts.js` | the car models and the nine kinds of hideout |
 | `js/fx.js`, `js/postfx.js` | smoke, sparks, skid marks, rain; bloom and colour grade |
 | `js/audio.js` | engine, sirens, music and effects, all synthesised (no sound files) |
 | `js/net.js` | room codes and browser-to-browser connections |
 | `data/map.json` | the town of Jugnupur: roads, places to rob, hiding spots, hand-off points |
+| `data/map-hotaru.json` | a second town, Hotaru-cho (Japan). Open the game with `?map=hotaru` on the address to play it; there is no map picker in the menu yet |
 | `vendor/` | [three.js](https://threejs.org) r160 (with its post-processing add-ons) and [PeerJS](https://peerjs.com) 1.5.4, both MIT licensed |
-| `tools/check-world.mjs` | `node tools/check-world.mjs` checks every place on the map can be driven to |
+| `tools/check-world.mjs` | `node tools/check-world.mjs` checks every place on the map can be driven to (`node tools/check-world.mjs hotaru` for the second town) |
 | `tools/stamp.mjs` | `node tools/stamp.mjs 3` after changing the game's code, so browsers fetch the new files together |
 | `tools/preview-*.html` | stand-alone viewers for the cars, hideouts, effects, sounds and signs |
 
