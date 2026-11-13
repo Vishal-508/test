@@ -1,7 +1,7 @@
 // Arcade car handling shared by players and computer police: throttle, steering, handbrake drift, nitro,
 // collisions against the town grid and other cars, and a path-following driver for the computer.
 // Headings: angle a means the car points along (sin a, cos a) on the map (x east, y south).
-import { CS } from './world.js?v=6';
+import { CS } from './world.js?v=7';
 
 // vmax top speed, acc engine pull, tA/tB steering curve: turn rate = steer x min(v / tA, tB / v) rad/s
 export const CAR = {

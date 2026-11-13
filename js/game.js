@@ -1,16 +1,16 @@
 // Chor Police: Jugnupur ki Raat. A night car chase: game rules, police AI, multiplayer sync, input, camera, HUD and the main loop.
 import * as THREE from '../vendor/three.module.min.js';
-import { CFG, matchSetup, rankFor, paintsUnlocked, applyRules, TOWNS, townName, LEVEL_NAMES, roomSetup, NIGHT_KINDS, composeRound, pickNight, pickTwist } from './config.js?v=6';
-import { buildWorld, hash2, LANE, N as GRID, CS } from './world.js?v=6';
-import { buildScene, paintMini, setSiteVisual, COLORS, LABELS, makeLabel } from './scene.js?v=6';
-import { makeVehicle, stepVehicle, makeDriver, drive, CAR } from './vehicle.js?v=6';
-import { makeCar, PAINTS } from './cars.js?v=6';
-import { Fx } from './fx.js?v=6';
-import { buildDressing } from './dressing.js?v=6';
-import { buildAmbient } from './ambient.js?v=6';
-import { makePost } from './postfx.js?v=6';
-import { initAudio, setMuted, isMuted, setMusicOn, isMusicOn, engine, skid, siren, heartbeat, rain, music, sfx } from './audio.js?v=6';
-import { HostNet, ClientNet, cleanCode } from './net.js?v=6';
+import { CFG, matchSetup, rankFor, paintsUnlocked, applyRules, TOWNS, townName, LEVEL_NAMES, roomSetup, NIGHT_KINDS, composeRound, pickNight, pickTwist } from './config.js?v=7';
+import { buildWorld, hash2, LANE, N as GRID, CS } from './world.js?v=7';
+import { buildScene, paintMini, setSiteVisual, COLORS, LABELS, makeLabel } from './scene.js?v=7';
+import { makeVehicle, stepVehicle, makeDriver, drive, CAR } from './vehicle.js?v=7';
+import { makeCar, PAINTS } from './cars.js?v=7';
+import { Fx } from './fx.js?v=7';
+import { buildDressing } from './dressing.js?v=7';
+import { buildAmbient } from './ambient.js?v=7';
+import { makePost } from './postfx.js?v=7';
+import { initAudio, setMuted, isMuted, setMusicOn, isMusicOn, engine, skid, siren, heartbeat, rain, music, sfx } from './audio.js?v=7';
+import { HostNet, ClientNet, cleanCode } from './net.js?v=7';
 
 const $ = id => document.getElementById(id);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));

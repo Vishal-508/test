@@ -9,6 +9,13 @@ export function cleanCode(s) { return String(s || '').toUpperCase().replace(/[^A
 
 function peerOptions() {
   const q = new URLSearchParams(location.search), ps = q.get('ps'), o = { debug: 1 };
+  // Ways for two devices to find each other. Several address-finders, plus relays for networks that will not let
+  // devices talk directly (many home routers, hostels and offices block device-to-device traffic on the same Wi-Fi).
+  o.config = { sdpSemantics: 'unified-plan', iceServers: [
+    { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] },
+    { urls: ['turn:eu-0.turn.peerjs.com:3478', 'turn:us-0.turn.peerjs.com:3478'], username: 'peerjs', credential: 'peerjsp' },
+    { urls: ['turn:openrelay.metered.ca:80', 'turn:openrelay.metered.ca:443', 'turn:openrelay.metered.ca:443?transport=tcp', 'turns:openrelay.metered.ca:443?transport=tcp'], username: 'openrelayproject', credential: 'openrelayproject' },
+  ] };
   if (ps) { const [host, port] = ps.split(':'); o.host = host; o.port = +(port || 9000); o.path = q.get('pp') || '/'; o.secure = false; } // test override: ?ps=localhost:9000
   return o;
 }
@@ -59,7 +66,9 @@ export class ClientNet {
       if (!P) return reject(new Error('Multiplayer library failed to load.'));
       let done = false;
       const fail = msg => { if (done) return; done = true; clearTimeout(timer); this.close(); reject(new Error(msg)); };
-      const timer = setTimeout(() => fail('Could not reach that room. Check the code and your internet.'), 20000);
+      let stage = 0;   // 0 not yet at the matchmaking service, 1 there, 2 the room answered
+      const timer = setTimeout(() => fail(stage === 0 ? 'Could not reach the matchmaking service. Check your internet and try again.'
+        : 'Found the room, but the two devices could not open a link to each other. Try again; if it keeps failing, put one device on mobile data or a hotspot (some Wi-Fi routers block devices from talking to each other).'), 35000);
       const peer = this.peer = new P(peerOptions());
       let retries = 2;   // the host's link to the matchmaking service can drop for a moment: ask again before giving up
       const dial = () => {
@@ -76,7 +85,7 @@ export class ClientNet {
       });
       peer.on('disconnected', () => { if (!this.closed) { try { peer.reconnect(); } catch (e) {} } });
       let dialled = false;
-      peer.on('open', () => { if (!dialled) { dialled = true; dial(); } });   // 'open' fires again after a reconnect to the service: do not dial twice
+      peer.on('open', () => { stage = Math.max(stage, 1); if (!dialled) { dialled = true; dial(); } });   // 'open' fires again after a reconnect to the service: do not dial twice
     });
   }
   send(msg) { if (this.conn && this.conn.open) { try { this.conn.send(msg); } catch (e) {} } }
