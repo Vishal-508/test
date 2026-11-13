@@ -1,10 +1,10 @@
 // Builds the town you drive through: wet painted ground that reacts to headlights, instanced buildings
 // with lit windows, landmarks, street lamps with light cones, loot markers, hideouts and labels.
 import * as THREE from '../vendor/three.module.min.js';
-import { N, CS, T, LANE, hash2 } from './world.js?v=8';
-import { buildHideout, kindFor } from './hideouts.js?v=8';
-import { CFG } from './config.js?v=8';
-import { canDrawKana, mergeBoxes } from './ambient.js?v=8';
+import { N, CS, T, LANE, hash2 } from './world.js?v=9';
+import { buildHideout, kindFor } from './hideouts.js?v=9';
+import { CFG } from './config.js?v=9';
+import { canDrawKana, mergeBoxes } from './ambient.js?v=9';
 
 const FONT = '"Baloo 2","Trebuchet MS","Segoe UI",sans-serif';
 
@@ -226,8 +226,8 @@ export function makeLabel(text, opts = {}) {
 
 // ---------------------------------------------------------------- building material: lit windows + see-through circle around the player's car
 // Dark roof tiles in rows, for the pitched roofs of old houses. Has the same see-through circle round the player's car as the walls.
-export function makeTileMaterial(U) {
-  const mat = new THREE.MeshLambertMaterial({ color: 0x41444f });
+export function makeTileMaterial(U, color) {
+  const mat = new THREE.MeshLambertMaterial({ color: color != null ? color : 0x41444f });
   mat.onBeforeCompile = sh => {
     sh.uniforms.uCut = U.uCut; sh.uniforms.uRes = U.uRes;
     sh.vertexShader = sh.vertexShader
@@ -502,7 +502,7 @@ export function buildScene(scene, map, W, U, quality) {
       0.5, 0, 0.5, 0.5, 0, -0.5, 0, 1, -0.5, 0.5, 0, 0.5, 0, 1, -0.5, 0, 1, 0.5,
       -0.5, 0, 0.5, 0.5, 0, 0.5, 0, 1, 0.5, 0.5, 0, -0.5, -0.5, 0, -0.5, 0, 1, -0.5], 3));
     pg.computeVertexNormals();
-    const rim = new THREE.InstancedMesh(pg, makeTileMaterial(U), gables.length);
+    const rim = new THREE.InstancedMesh(pg, makeTileMaterial(U, W.layout.roofColor), gables.length);   // a town may ask for its own roof tiles (terracotta, say)
     gables.forEach((b, k) => {
       const alongX = b.w >= b.d, span = alongX ? b.d : b.w, len = alongX ? b.w : b.d, rise = Math.min(0.7, 0.42 * span);
       dummy.position.set(b.x + b.w / 2, b.h, b.y + b.d / 2); dummy.rotation.set(0, alongX ? Math.PI / 2 : 0, 0); dummy.scale.set(span + 0.26, rise, len + 0.14); dummy.updateMatrix();
@@ -624,6 +624,34 @@ export function buildScene(scene, map, W, U, quality) {
         const n = q.n || 10, im = new THREE.InstancedMesh(new THREE.SphereGeometry(0.06, 8, 6), bas(q.color || 0xff5a3a), n);
         for (let k = 0; k < n; k++) { const f = (k + 0.5) / n; dummy.position.set(q.x0 + (q.x1 - q.x0) * f, (q.h || 1.15) - Math.sin(f * Math.PI) * 0.12, q.y0 + (q.y1 - q.y0) * f); dummy.rotation.set(0, 0, 0); dummy.scale.set(1, 1.25, 1); dummy.updateMatrix(); im.setMatrixAt(k, dummy.matrix); }
         im.frustumCulled = false; scene.add(im);
+      } else if (q.type === 'campanile') { // a square bell tower: shaft, open belfry with a lit bell chamber, pointed cap (also does for a lighthouse)
+        const r = M[q.mark]; if (r) cellBoxes(r, () => 0.3, cutMat(0x8a8072));
+        const h = q.h || 7, w = q.w || 1.5, mat = cutMat(q.color || 0xb5704a), trim = cutMat(0xe6dcc6);
+        box(w, h, w, mat, q.x, 0.3 + h / 2, q.y);
+        if (q.stripe != null) for (const f of [0.3, 0.62]) box(w + 0.03, h * 0.14, w + 0.03, cutMat(q.stripe), q.x, 0.3 + h * f, q.y);
+        box(w + 0.22, 0.14, w + 0.22, trim, q.x, 0.3 + h + 0.07, q.y);
+        for (const sx of [-1, 1]) for (const sz of [-1, 1]) box(0.16, 0.8, 0.16, trim, q.x + sx * (w / 2 - 0.08), 0.3 + h + 0.54, q.y + sz * (w / 2 - 0.08));
+        box(w * 0.62, 0.5, w * 0.62, bas(q.lamp ? 0xfff2c0 : 0xffc878), q.x, 0.3 + h + 0.5, q.y);
+        box(w + 0.22, 0.12, w + 0.22, trim, q.x, 0.3 + h + 1.0, q.y);
+        const cap = new THREE.Mesh(new THREE.ConeGeometry((w + 0.2) * 0.72, q.lamp ? 0.6 : 1.5, 4), cutMat(q.lamp ? 0x4a4e58 : 0x9c4a32)); cap.position.set(q.x, 0.3 + h + 1.06 + (q.lamp ? 0.3 : 0.75), q.y); cap.rotation.y = Math.PI / 4; scene.add(cap);
+        tag(q.label, q.x, 0.3 + h + 3.1, q.y, q.labelColor || '#ffe2b0', 0.44);
+      } else if (q.type === 'duomo') {     // a cathedral: pale nave, a drum and a ribbed dome over the crossing, a lit rose window
+        const r = M[q.mark]; if (!r) continue;
+        const cx = (r.x0 + r.x1) / 2, cz = (r.y0 + r.y1) / 2, w = r.x1 - r.x0, d = r.y1 - r.y0, h = q.h || 2.3, rad = Math.min(w, d) * 0.3;
+        cellBoxes(r, () => h, cutMat(q.color || 0xd8cdb6));
+        box(w + 0.3, 0.12, d + 0.3, cutMat(0xbfb39a), cx, h + 0.06, cz);
+        cyl(rad, rad, 0.7, 12, cutMat(q.color || 0xd8cdb6), cx, h + 0.47, cz);
+        const dm = new THREE.Mesh(new THREE.SphereGeometry(rad * 1.04, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), cutMat(q.dome || 0xa8553a)); dm.position.set(cx, h + 0.82, cz); scene.add(dm);
+        cyl(0.12, 0.16, 0.5, 8, cutMat(0xe6dcc6), cx, h + 0.82 + rad * 1.04 + 0.2, cz);
+        for (const sx of [-1, 1]) { const rose = new THREE.Mesh(new THREE.CircleGeometry(0.42, 16), bas(0xffd890)); rose.position.set(cx + sx * (w / 2 + 0.03), h * 0.68, cz); rose.rotation.y = sx * Math.PI / 2; scene.add(rose); }
+        tag(q.label, cx, h + rad * 1.04 + 2.3, cz, q.labelColor || '#ffe9c8', 0.46);
+      } else if (q.type === 'fountain') {  // a round basin with lit water and a column in the middle
+        const rr = q.r || 1;
+        cyl(rr, rr * 1.06, 0.26, 20, cutMat(0xcfc6b2), q.x, 0.13, q.y);
+        cyl(rr * 0.86, rr * 0.86, 0.04, 20, bas(0x6fd8ff), q.x, 0.28, q.y);
+        cyl(0.1, 0.16, 1.1, 8, cutMat(0xe6dcc6), q.x, 0.8, q.y);
+        cyl(rr * 0.36, 0.1, 0.12, 12, cutMat(0xcfc6b2), q.x, 1.0, q.y);
+        const jet = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 6), bas(0xcff2ff)); jet.position.set(q.x, 1.42, q.y); scene.add(jet);
       } else if (q.type === 'label') tag(q.text, q.x, q.h || 2, q.y, q.color, q.size);
     }
   }

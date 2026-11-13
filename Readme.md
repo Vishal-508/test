@@ -112,8 +112,9 @@ For testing, add `&link=relay` to the address on the joining device to skip the 
 | `js/relay.js` | the backup route for devices that cannot link directly: a small MQTT client and the hand-over rules on top of it |
 | `data/map.json` | the town of Jugnupur: roads, places to rob, hiding spots, hand-off points |
 | `data/map-hotaru.json` | a second town, Hotaru-cho (Japan). Pick it with the **Town** button on the menu or in a room |
+| `data/map-lucciola.json` | a third town, Porto Lucciola (Italy): piazza, bell tower, cathedral, harbour and lighthouse |
 | `vendor/` | [three.js](https://threejs.org) r160 (with its post-processing add-ons) and [PeerJS](https://peerjs.com) 1.5.4, both MIT licensed |
-| `tools/check-world.mjs` | `node tools/check-world.mjs` checks every place on the map can be driven to (`node tools/check-world.mjs hotaru` for the second town) |
+| `tools/check-world.mjs` | `node tools/check-world.mjs` checks every place on the map can be driven to (`node tools/check-world.mjs hotaru` or `lucciola` for the other towns) |
 | `tools/stamp.mjs` | `node tools/stamp.mjs 3` after changing the game's code, so browsers fetch the new files together |
 | `tools/preview-*.html` | stand-alone viewers for the cars, hideouts, effects, sounds and signs |
 

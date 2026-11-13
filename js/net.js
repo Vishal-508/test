@@ -2,7 +2,7 @@
 // join with a 4-letter code. The free PeerJS broker introduces the browsers to each other. When two devices cannot
 // open a direct link (very common on the same home Wi-Fi), the same messages go through a public message relay
 // instead: see relay.js. No game server is needed either way, so GitHub Pages can host it.
-import { RelayHost, RelayGuest, relayUrls, onShow } from './relay.js?v=8';
+import { RelayHost, RelayGuest, relayUrls, onShow } from './relay.js?v=9';
 
 const PREFIX = 'jugnupur-chorpolice-v1-';
 const LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ';

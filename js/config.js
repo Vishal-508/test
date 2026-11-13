@@ -69,6 +69,7 @@ export function applyRules(r) {
 export const TOWNS = [
   { id: '', name: 'Jugnupur', country: 'India', officers: ['Insp. Tiwari', 'Havaldar Pandu', 'Daroga Shamsher', 'SI Bhola', 'Hav. Tukaram', 'Insp. Rathore', 'Sipahi Lallan', 'Daroga Yadav', 'SI Meena', 'Insp. Durga', 'Hav. Ganpat', 'SI Kiran'] },
   { id: 'hotaru', name: 'Hotaru-cho', country: 'Japan', officers: ['Junsa Sato', 'Junsa Tanaka', 'Keibu Yamada', 'Junsa Suzuki', 'Keibu-ho Ito', 'Junsa Kimura', 'Keibu Mori', 'Junsa Ono', 'Junsa-cho Abe', 'Keibu Hayashi', 'Junsa Ogawa', 'Junsa Endo'] },
+  { id: 'lucciola', name: 'Porto Lucciola', country: 'Italy', officers: ['Isp. Russo', 'Agente Bianchi', 'Comm. Ferrari', 'Agente Esposito', 'Isp. Romano', 'Agente Colombo', 'Brig. Ricci', 'Agente Marino', 'Isp. Greco', 'Agente Conti', 'Brig. De Luca', 'Agente Costa'] },
 ];
 export const townName = id => { const t = TOWNS.find(q => q.id === id); return t ? t.name : 'Jugnupur'; };
 
