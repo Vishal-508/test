@@ -74,6 +74,7 @@ kbd{font-family:ui-monospace,Menlo,monospace;font-size:.82em;background:#1b2540;
 #dash{position:absolute;left:calc(14px + var(--sal));bottom:calc(52px + var(--sab));display:flex;flex-direction:column;gap:5px;align-items:flex-start}
 #speed{font-family:var(--display);line-height:1;text-shadow:0 2px 8px #000} #speed b{font-size:2.6rem;font-weight:800;font-variant-numeric:tabular-nums} #speed span{font-size:.85rem;color:var(--muted);margin-left:5px}
 #nitro{width:150px;height:8px;background:rgba(255,255,255,.14);border-radius:5px;overflow:hidden} #nitro i{display:block;height:100%;width:100%;background:linear-gradient(90deg,#3bd0ff,#b6f3ff);border-radius:5px}
+#lamp:empty{display:none} #nitro{transition:box-shadow .2s} #nitro.gain{box-shadow:0 0 0 2px #b6f3ff,0 0 14px #3bd0ff}
 #lamp{font-size:.72rem;letter-spacing:.08em;color:#ffe9a8;text-shadow:0 1px 4px #000} #lamp.off{color:rgba(255,255,255,.35)}
 #bust{position:absolute;top:36%;left:50%;transform:translateX(-50%);width:min(60vw,300px);text-align:center}
 #bustText{font-family:var(--display);font-weight:800;color:var(--danger);letter-spacing:.2em;text-shadow:0 2px 8px #000}
@@ -101,10 +102,10 @@ body.hiding #dash,body.hiding #touch,body.hiding #help,body.hiding #prompt,body.
 #lootText{font-family:var(--display);font-weight:700;font-variant-numeric:tabular-nums}
 .bar{height:7px;background:rgba(255,255,255,.12);border-radius:4px;overflow:hidden;margin-top:3px} .bar i{display:block;height:100%;width:0;background:var(--loot);border-radius:4px;transition:width .15s linear}
 #feed{position:absolute;top:calc(74px + var(--sat));left:50%;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:5px;width:min(92vw,520px)}
-#feed div{background:rgba(8,12,22,.82);border:1px solid var(--line);border-radius:999px;padding:3px 14px;font-size:.92rem;animation:fin .25s ease-out;text-align:center}
+#feed div{background:rgba(8,12,22,.7);border:1px solid var(--line);border-radius:999px;padding:2px 12px;font-size:.84rem;animation:fin .25s ease-out;text-align:center}
 #feed .alarm{border-color:rgba(255,74,74,.7);color:#ffb3b3} #feed .good{border-color:rgba(59,201,139,.7);color:#a8f3d0} #feed .gold{border-color:rgba(243,180,63,.7);color:#ffdf9c}
 @keyframes fin{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
-#banner{position:absolute;top:27%;left:50%;transform:translate(-50%,-50%);font-family:var(--display);font-weight:800;font-size:clamp(1.8rem,7vw,3.2rem);text-align:center;text-shadow:0 3px 0 rgba(0,0,0,.6),0 0 30px rgba(0,0,0,.8);opacity:0;transition:opacity .25s;width:92vw}
+#banner{position:absolute;top:21%;left:50%;transform:translate(-50%,-50%);font-family:var(--display);font-weight:800;font-size:clamp(1.3rem,4.6vw,2.1rem);text-align:center;text-shadow:0 3px 0 rgba(0,0,0,.6),0 0 30px rgba(0,0,0,.8);opacity:0;transition:opacity .25s;width:92vw}
 #banner.on{opacity:1} #banner.red{color:var(--danger)} #banner.gold{color:var(--loot)} #banner.green{color:var(--escape)} #banner.blue{color:var(--police)}
 #threat{position:absolute;display:none;width:0;height:0;border-left:15px solid transparent;border-right:15px solid transparent;border-bottom:30px solid var(--danger);filter:drop-shadow(0 0 8px rgba(255,60,60,.9));animation:pulse .5s ease-in-out infinite alternate}
 @keyframes pulse{from{opacity:.55}to{opacity:1}}
@@ -116,7 +117,7 @@ body.hiding #dash,body.hiding #touch,body.hiding #help,body.hiding #prompt,body.
 #vignette{position:fixed;inset:0;pointer-events:none;z-index:9;opacity:0;box-shadow:inset 0 0 120px 40px rgba(255,30,30,.55);transition:opacity .2s}
 #corner{position:absolute;left:calc(10px + var(--sal));bottom:calc(10px + var(--sab));display:flex;gap:8px;pointer-events:auto!important}
 #corner button{font-size:.85rem;padding:.4em .8em;background:rgba(14,20,36,.85)}
-#help{position:absolute;left:50%;bottom:calc(10px + var(--sab));transform:translateX(-50%);font-size:.82rem;color:var(--muted);text-shadow:0 1px 3px #000;white-space:nowrap}
+#help{transition:opacity .8s;position:absolute;left:50%;bottom:calc(10px + var(--sab));transform:translateX(-50%);font-size:.82rem;color:var(--muted);text-shadow:0 1px 3px #000;white-space:nowrap}
 /* touch controls */
 #touch{position:absolute;inset:0;display:none}
 #stick{position:absolute;width:120px;height:120px;border-radius:50%;border:2px solid rgba(255,255,255,.25);background:rgba(255,255,255,.06);display:none}
@@ -138,7 +139,7 @@ body.touch #prompt{bottom:calc(214px + var(--sab))}
   body.touch #prompt{bottom:48%}
   body.hiding #mini{display:none} #hideText{white-space:normal;width:88vw;text-align:center;font-size:.92rem;letter-spacing:.08em} #hideBars{top:calc(9vh + 62px)} body.hiding.touch #corner{top:calc(9vh + 150px)}
   #feed{left:calc(10px + var(--sal));right:calc(132px + var(--sar));top:calc(104px + var(--sat));transform:none;width:auto;align-items:flex-start} #feed div{border-radius:12px;text-align:left;font-size:.86rem} #phase{max-width:120px} }
-@media (max-height:460px){ #prompt{bottom:calc(92px + var(--sab));padding:5px 12px} body.touch #prompt{bottom:auto;top:calc(96px + var(--sat))} #banner{top:24%;font-size:1.7rem} #help{display:none}
+@media (max-height:460px){ #prompt{bottom:calc(92px + var(--sab));padding:5px 12px} body.touch #prompt{bottom:auto;top:calc(96px + var(--sat))} #banner{top:22%;font-size:1.3rem} #help{display:none}
   #mini{width:100px;height:100px;top:calc(58px + var(--sat))} body.touch #corner{top:calc(84px + var(--sat));left:calc(10px + var(--sal));right:auto;flex-direction:row;gap:6px} #corner button{font-size:.72rem;padding:.25em .55em}
   .card{padding:14px;gap:9px} .title{font-size:2.1rem} .result{font-size:1.7rem} #feed{top:calc(60px + var(--sat))} #feed div{font-size:.84rem}
   #btnAct{width:78px;height:78px;bottom:calc(18px + var(--sab))} #btnNitro{width:60px;height:60px;right:calc(104px + var(--sar));bottom:calc(12px + var(--sab))} #btnBrake{width:56px;height:56px;right:calc(30px + var(--sar));bottom:calc(104px + var(--sab))}
@@ -279,6 +280,6 @@ body.touch #prompt{bottom:calc(214px + var(--sab))}
 <noscript><div style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#0a0f1d;color:#e9eef8;z-index:99;padding:20px;text-align:center">Chor Police needs JavaScript. Please turn it on in your browser and reload.</div></noscript>
 <div id="loading">Building Jugnupur…</div>
 <script src="vendor/peerjs.min.js"></script>
-<script type="module" src="js/game.js?v=5"></script>
+<script type="module" src="js/game.js?v=6"></script>
 </body>
 </html>

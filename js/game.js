@@ -1,16 +1,16 @@
 // Chor Police: Jugnupur ki Raat. A night car chase: game rules, police AI, multiplayer sync, input, camera, HUD and the main loop.
 import * as THREE from '../vendor/three.module.min.js';
-import { CFG, matchSetup, rankFor, paintsUnlocked, applyRules, TOWNS, townName, LEVEL_NAMES, roomSetup, NIGHT_KINDS, composeRound, pickNight, pickTwist } from './config.js?v=5';
-import { buildWorld, hash2, LANE, N as GRID, CS } from './world.js?v=5';
-import { buildScene, paintMini, setSiteVisual, COLORS, LABELS, makeLabel } from './scene.js?v=5';
-import { makeVehicle, stepVehicle, makeDriver, drive, CAR } from './vehicle.js?v=5';
-import { makeCar, PAINTS } from './cars.js?v=5';
-import { Fx } from './fx.js?v=5';
-import { buildDressing } from './dressing.js?v=5';
-import { buildAmbient } from './ambient.js?v=5';
-import { makePost } from './postfx.js?v=5';
-import { initAudio, setMuted, isMuted, setMusicOn, isMusicOn, engine, skid, siren, heartbeat, rain, music, sfx } from './audio.js?v=5';
-import { HostNet, ClientNet, cleanCode } from './net.js?v=5';
+import { CFG, matchSetup, rankFor, paintsUnlocked, applyRules, TOWNS, townName, LEVEL_NAMES, roomSetup, NIGHT_KINDS, composeRound, pickNight, pickTwist } from './config.js?v=6';
+import { buildWorld, hash2, LANE, N as GRID, CS } from './world.js?v=6';
+import { buildScene, paintMini, setSiteVisual, COLORS, LABELS, makeLabel } from './scene.js?v=6';
+import { makeVehicle, stepVehicle, makeDriver, drive, CAR } from './vehicle.js?v=6';
+import { makeCar, PAINTS } from './cars.js?v=6';
+import { Fx } from './fx.js?v=6';
+import { buildDressing } from './dressing.js?v=6';
+import { buildAmbient } from './ambient.js?v=6';
+import { makePost } from './postfx.js?v=6';
+import { initAudio, setMuted, isMuted, setMusicOn, isMusicOn, engine, skid, siren, heartbeat, rain, music, sfx } from './audio.js?v=6';
+import { HostNet, ClientNet, cleanCode } from './net.js?v=6';
 
 const $ = id => document.getElementById(id);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -29,7 +29,7 @@ const HIDE = CFG.HIDE, BUST = CFG.BUST;
 // ------------------------------------------------------------------ saved progress
 const SAVE_KEY = 'jugnupur.save.v2';
 const save = (() => {
-  const d = { name: '', night: 1, total: 0, wins: 0, muted: false, music: true, paint: '', quality: 'auto', cam: 'auto', town: '', medals: {} };
+  const d = { name: '', night: 1, total: 0, wins: 0, muted: false, music: true, paint: '', quality: 'auto', cam: 'auto', town: '', medals: {}, seen: {} };
   try { const old = JSON.parse(localStorage.getItem('jugnupur.save.v1') || '{}'); if (old.name) d.name = old.name; } catch (e) { /* no older save */ }
   try { return Object.assign(d, JSON.parse(localStorage.getItem(SAVE_KEY) || '{}')); } catch (e) { return d; }
 })();
@@ -88,11 +88,11 @@ let toastTimer = 0;
 function toast(text) { const t = $('toast'); t.textContent = text; t.classList.add('on'); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('on'), 3400); }
 function feed(text, kind, ms) {
   const f = $('feed'), d = document.createElement('div'); d.textContent = text; if (kind) d.className = kind; f.appendChild(d);
-  while (f.children.length > 3) f.removeChild(f.firstChild);
-  setTimeout(() => { if (d.parentNode) d.parentNode.removeChild(d); }, ms || 5200);
+  while (f.children.length > 2) f.removeChild(f.firstChild);   // never more than two lines up at once
+  setTimeout(() => { if (d.parentNode) d.parentNode.removeChild(d); }, ms || 3600);
 }
 let bannerTimer = 0;
-function banner(text, kind) { const b = $('banner'); b.textContent = text; b.className = 'on ' + (kind || ''); clearTimeout(bannerTimer); bannerTimer = setTimeout(() => { b.className = ''; }, 2200); }
+function banner(text, kind) { const b = $('banner'); b.textContent = text; b.className = 'on ' + (kind || ''); clearTimeout(bannerTimer); bannerTimer = setTimeout(() => { b.className = ''; }, 1600); }
 function ping(x, y, dur, col) { S.pings.push({ x, y, t0: performance.now(), dur: dur * 1000, col }); }
 const myName = () => (($('name').value || '').trim().slice(0, 14)) || 'Chhotu';
 const paintHex = id => (PAINTS.find(p => p.id === id) || PAINTS[0]).hex;
@@ -159,13 +159,13 @@ function beginMatch(m) {
   setScreen('play');
   lastHost = performance.now();
   if (m.cfg.name) banner(m.cfg.name, 'gold');
-  if (m.cfg.night || m.cfg.twist) { // a room with surprises: say what is different tonight
-    if (m.cfg.night) feed(m.cfg.night.name + ': ' + m.cfg.night.blurb, 'gold', 10000);   // these stay up longer: they are the rules of the round
-    if (m.cfg.twist) feed('Twist · ' + m.cfg.twist.name + ': ' + m.cfg.twist.blurb, 'gold', 10000);
-    feed((me.role === 'chor' ? 'Bank ' : 'Stop them banking ') + money(S.target) + ' in ' + mmss(CFG.ROUND) + '.' + (S.closedSites.size ? ' ' + [...S.closedSites].map(i => W.sites[i].name).join(' and ') + (S.closedSites.size > 1 ? ' are' : ' is') + ' shut tonight.' : ''), '', 10000);
-  } else if (me.role === 'chor') { feed('Stop on a gold ring to rob it. Roll through a green beam to bank.', 'gold'); feed('Jeeps bust slow cars. Hide at a violet door when you have a lead.'); }
-  else { feed('Engines on. Stay beside a slow getaway car to bust it.'); feed('Follow alarms on your radar. Stop at a hideout door and hold SEARCH.'); }
-  if (isTouch && innerHeight > innerWidth) toast('Turn your phone sideways for a wider view of the road.');
+  // one line about what is unusual tonight (the rest is in the pause menu); how-to hints only the first time someone plays a side
+  const once = key => { if (!save.seen || typeof save.seen !== 'object') save.seen = {}; if (save.seen[key]) return false; save.seen[key] = 1; storeSave(); return true; };
+  if (m.cfg.twist) feed(m.cfg.twist.name + ': ' + m.cfg.twist.blurb, 'gold', 7000);
+  else if (m.cfg.night && m.cfg.night.name !== NIGHT_KINDS[0].name) feed(m.cfg.night.blurb, 'gold', 6000);
+  else if (me.role === 'chor' && once('chor')) feed('Stop on a gold ring to rob it. Roll through a green beam to bank.', 'gold', 8000);
+  else if (me.role === 'police' && once('police')) feed('Stay beside a slow getaway car to bust it. Hold SEARCH at a hideout door.', '', 8000);
+  if (isTouch && innerHeight > innerWidth && once('sideways')) toast('Turn your phone sideways for a wider view of the road.');
   try { if (navigator.wakeLock && navigator.wakeLock.request) navigator.wakeLock.request('screen').catch(() => {}); } catch (e) { /* screen may dim; harmless */ }
   canvas.focus();
 }
@@ -598,30 +598,32 @@ function handleEvent(e) {
   if (e.to && e.to !== me.id) return;
   const mine = e.who === me.id || (Array.isArray(e.who) && e.who.includes(me.id)), mark = () => { S.lastAlarm = { x: e.x, y: e.y, t: performance.now() }; };
   switch (e.t) {
-    case 'alarm': ping(e.x, e.y, 9, '#ff4a4a'); feed(e.m, 'alarm'); sfx.alarm(); mark(); if (me.role === 'police') sfx.radio(); break;
+    case 'alarm': ping(e.x, e.y, 9, '#ff4a4a'); sfx.alarm(); mark(); if (me.role === 'police') { feed(e.m, 'alarm'); sfx.radio(); } break;
     case 'ping': ping(e.x, e.y, 5, '#ff8a4a'); if (me.role === 'police') { feed(e.m, 'alarm'); mark(); sfx.radio(); } sfx.bell(); break;
-    case 'grab': feed(e.m, 'gold'); if (mine) { sfx.grab(); if (!S.flags.tipGrab) { S.flags.tipGrab = 1; feed('A jeep is coming to this alarm. Drive off, or tuck into a violet door before it gets here.'); } } break;
-    case 'tip': if (me.role === 'police') { ping(e.x, e.y, 6, '#ff8a4a'); feed(e.m, 'alarm'); mark(); sfx.radio(); } else if (mine) { feed('Someone called it in. The police know where you are!', 'alarm'); sfx.bell(); } break;
-    case 'informer': if (me.role === 'police') { ping(e.x, e.y, 8, '#c9a0ff'); feed(e.m, 'alarm'); mark(); sfx.radio(); } else if (mine) { banner('INFORMER NE BATA DIYA!', 'red'); sfx.spotted(); } break;
-    case 'bank': feed(e.m, 'good'); if (e.j) { sfx.jackpot(); if (me.role === 'police') { ping(e.x, e.y, 10, '#ff4a4a'); mark(); } } else sfx.coin(); break;
+    case 'grab': if (mine) sfx.grab(); else feed(e.m, 'gold'); break;   // my own grab shows in the boot
+    case 'tip': if (me.role === 'police') { ping(e.x, e.y, 6, '#ff8a4a'); feed(e.m, 'alarm'); mark(); sfx.radio(); } else if (mine) { feed('Tip-off! The police know where you are.', 'alarm'); sfx.bell(); } break;
+    case 'informer': if (me.role === 'police') { ping(e.x, e.y, 8, '#c9a0ff'); feed(e.m, 'alarm'); mark(); sfx.radio(); } else if (mine) { banner('INFORMER!', 'red'); sfx.spotted(); } break;
+    case 'bank': if (!mine) feed(e.m, 'good'); if (e.j) { sfx.jackpot(); if (me.role === 'police') { ping(e.x, e.y, 10, '#ff4a4a'); mark(); } } else sfx.coin(); break;   // my own shows on the loot bar
     case 'fuel': me.nitro = e.min ? Math.max(me.nitro, e.n) : Math.min(1, me.nitro + e.n); break;
-    case 'arrest': feed(e.m, 'alarm'); sfx.caught(); if (mine) { banner('BUSTED!', 'red'); S.cam.shake = 0.5; } break;
-    case 'free': feed(e.m, 'good'); sfx.free(); if (mine) banner('AZAAD!', 'green'); break;
-    case 'safe': banner('BACH GAYE! They found nothing.', 'green'); sfx.free(); me.nitro = Math.min(1, me.nitro + CFG.NITRO.NEAR_MISS * 2); break;
-    case 'chime': banner(e.m, 'gold'); feed(e.m, 'gold'); sfx.chime(); break;
-    case 'hot': ping(e.x, e.y, 12, '#ffe27a'); feed(e.m, 'gold'); sfx.chime(); if (me.role === 'police') mark(); else banner('HOT TARGET · DOUBLE', 'gold'); break;
+    case 'arrest': sfx.caught(); if (mine) { banner('BUSTED!', 'red'); S.cam.shake = 0.5; } else feed(e.m, 'alarm'); break;
+    case 'free': sfx.free(); if (mine) banner('AZAAD!', 'green'); else feed(e.m, 'good'); break;
+    case 'safe': banner('BACH GAYE!', 'green'); sfx.free(); me.nitro = Math.min(1, me.nitro + CFG.NITRO.NEAR_MISS * 2); nitroFlash(); break;
+    case 'chime': feed(e.m, 'gold', 4500); sfx.chime(); break;
+    case 'hot': ping(e.x, e.y, 12, '#ffe27a'); feed(e.m, 'gold', 4500); sfx.chime(); if (me.role === 'police') mark(); break;
     case 'track':
-      if (me.role === 'police') { for (const q of (e.pts || [])) ping(+q[0] || 0, +q[1] || 0, 6, '#ff4a4a'); feed('Radio: getaway cars located. Check your radar.', 'alarm'); sfx.radio(); }
-      else if (loose(me)) { feed('The police radio just gave your position away!', 'alarm'); sfx.bell(); }
+      if (me.role === 'police') { for (const q of (e.pts || [])) ping(+q[0] || 0, +q[1] || 0, 6, '#ff4a4a'); feed('Radio: getaway cars located.', 'alarm'); sfx.radio(); }
+      else if (loose(me)) { feed('The police radio gave your position away!', 'alarm'); sfx.bell(); }
       break;
-    case 'go': if (e.b) banner(me.role === 'chor' ? 'POLICE ROLLING!' : 'GO!', 'red'); else feed(e.m); if (me.role === 'chor') sfx.radio(); break;
-    case 'spot': banner('DEKH LIYA! BHAAG!', 'red'); sfx.spotted(); break;
+    case 'go': if (me.role === 'chor') sfx.radio(); break;        // the line under the clock has been counting down
+    case 'spot': sfx.spotted(); break;                              // the HUNTED tag, the red edges and the siren say it
     case 'left': { feed(e.m); const P = S.players.get(e.who); if (P && !S.isHost) { dropEntity(P); S.players.delete(e.who); } break; }
     default: if (e.m) feed(e.m);
   }
 }
 
 // ------------------------------------------------------------------ local player: driving
+let nitroFlashT = 0;
+function nitroFlash() { const el = $('nitro'); el.classList.add('gain'); clearTimeout(nitroFlashT); nitroFlashT = setTimeout(() => el.classList.remove('gain'), 600); }
 function request(type, i) { if (S.isHost) doAction(S.me, type, i); else if (S.net) S.net.send({ k: 'a', t: type, i }); }
 // What the place I am at is doing for me right now. Robbing, banking and levers need no button: you stop, they happen.
 function findContext(me) {
@@ -640,8 +642,8 @@ function findContext(me) {
       const d = dist(v, s); if (d > CFG.ROB_RANGE) return;
       const st = S.sites[i].st;
       if (st === 2) return;
-      if (st === 1) out.push({ s: d / CFG.ROB_RANGE + 0.2, type: 'none', label: s.coach ? (S.t < CFG.COACH_OPEN ? 'Strongbox opens at ' + mmss(CFG.ROUND - CFG.COACH_OPEN) + ' on the clock' : 'Strongbox is shut') : (S.t < CFG.JACKPOT_AT ? 'Locked until the clock tower chimes' : 'Locked again for a moment') });
-      else if (!canCarry(me, i)) out.push({ s: d / CFG.ROB_RANGE + 0.2, type: 'none', label: 'The boot is full. Hand it over first.' });
+      if (st === 1) { if (sp < 1.2) out.push({ s: d / CFG.ROB_RANGE + 0.2, type: 'none', label: s.coach ? (S.t < CFG.COACH_OPEN ? 'Strongbox opens at ' + mmss(CFG.ROUND - CFG.COACH_OPEN) + ' on the clock' : 'Strongbox is shut') : (S.t < CFG.JACKPOT_AT ? 'Locked until the clock tower chimes' : 'Locked again for a moment') }); }
+      else if (!canCarry(me, i)) { if (sp < 1.2) out.push({ s: d / CFG.ROB_RANGE + 0.2, type: 'none', label: 'The boot is full. Hand it over first.' }); }
       else out.push({ s: d / CFG.ROB_RANGE - 0.4, type: 'auto', brake: true, frac: S.isHost ? S.sites[i].prog / CFG.HOLD[s.tier] : S.sites[i].pct / 100, label: sp > CFG.ROB_SPEED ? 'Stop here to rob ' + s.full + (isHot(i) ? ' · DOUBLE' : '') : 'Robbing ' + s.full + '  ' + money(worth(i)) + (s.tier === 3 && !(S.sites[i].prog >= CFG.HOLD[3] * CFG.SIREN_AT || S.sites[i].pct >= CFG.SIREN_AT * 100) ? '  (siren soon)' : '') });
     });
     if (chors().some(p => p.jailed && p !== me)) for (const l of W.levers) {
@@ -651,15 +653,16 @@ function findContext(me) {
     }
     if (me.hiding < 0) for (const h of W.hides) {
       const d = dist(v, h.front); if (d > HIDE.RANGE) continue;
+      if (sp > HIDE.SPEED) continue;   // driving past a door at speed: say nothing (the violet arrows on the road mark it)
       if (S.closedHides.has(h.i)) out.push({ s: d / HIDE.RANGE + 0.4, type: 'none', label: h.name + ' is padlocked tonight' });
       else if ([...S.players.values()].some(o => o !== me && (o.hidden === h.i || o.hiding === h.i))) out.push({ s: d / HIDE.RANGE + 0.3, type: 'none', label: 'Someone is already in ' + h.name });
-      else if (sp > HIDE.SPEED) out.push({ s: d / HIDE.RANGE + 0.05, type: 'none', label: 'Slow down to hide in ' + h.name });
       else out.push({ s: d / HIDE.RANGE + 0.05, type: 'hide', i: h.i, key: 'hide' + h.i, hold: 0.12, act: true, label: (isTouch ? 'HIDE: ' : 'Press E: hide in ') + h.name });
     }
   } else {
     if (S.t < CFG.COUNT) return { type: 'none', label: 'Engines on… ' + Math.ceil(CFG.COUNT - S.t) };
     for (const h of W.hides) {
       const d = dist(v, h.search); if (d > CFG.LEVER_RANGE + 0.6) continue;
+      if (sp > 2) continue;            // a jeep driving past says nothing
       if (sp > 1) out.push({ s: d, type: 'none', label: 'Stop to search ' + h.name });
       else out.push({ s: d, type: 'search', i: h.i, key: 'search' + h.i, act: true, frac: S.searchLv[h.i] || 0, label: (S.searchLv[h.i] || 0) > 0 ? 'Searching ' + h.name + '…' : 'Hold to search ' + h.name });
     }
@@ -761,7 +764,7 @@ function drivePhysics(me, dt) {
 }
 function resetCar(me) {
   const q = W.safeSpot(me.v.x, me.v.y, me.role !== 'chor'), v = me.v;
-  v.x = q.x; v.y = q.y; v.a = q.a; v.vx = v.vy = v.vf = 0; v.stall = 0.5; S.stuckT = 0; S.resetT = 0; S.cam.yaw = Math.PI - v.a; feed('Back on the road.');
+  v.x = q.x; v.y = q.y; v.a = q.a; v.vx = v.vy = v.vf = 0; v.stall = 0.5; S.stuckT = 0; S.resetT = 0; S.cam.yaw = Math.PI - v.a;
 }
 // once per frame: scripts starting and ending, the action button, close shaves, telling the host where I am
 function localFrame(dt) {
@@ -799,10 +802,10 @@ function localFrame(dt) {
   if (me.role === 'chor' && loose(me) && !me.scr) {
     S.missT -= dt; let close = false;
     for (const o of S.others) if (o.P === CAR.police) { const d = Math.hypot(o.x - v.x, o.y - v.y), rel = Math.hypot((o.vx || 0) - v.vx, (o.vy || 0) - v.vy); if (d < 1.15 && rel > 2.6 && Math.abs(v.vf) > 2.3) close = true; }
-    if (close && !v.bump) S.missArm = 0.5; else if (S.missArm > 0) { S.missArm -= dt; if (S.missArm <= 0 && S.missT <= 0 && me.bust < 0.5) { S.missT = 4; me.nitro = Math.min(1, me.nitro + CFG.NITRO.NEAR_MISS); banner('BAAL-BAAL BACHE! +nitro', 'gold'); } }
+    if (close && !v.bump) S.missArm = 0.5; else if (S.missArm > 0) { S.missArm -= dt; if (S.missArm <= 0 && S.missT <= 0 && me.bust < 0.5) { S.missT = 4; me.nitro = Math.min(1, me.nitro + CFG.NITRO.NEAR_MISS); nitroFlash(); } }
     if (v.bump) S.missArm = 0;
   }
-  if (S.boostMsg) { banner(S.boostMsg, 'gold'); S.boostMsg = ''; }
+  if (S.boostMsg) { nitroFlash(); S.boostMsg = ''; }
   // clients tell the host where they are
   if (!S.isHost && S.net) {
     const now = performance.now();
@@ -942,12 +945,14 @@ function updateLabels() {
   const street = camMode() === 'street' && (S.screen === 'play' || S.screen === 'over');
   if (H.cones) H.cones.visible = !street && !S.dark;
   if (hudCache.street !== street) { hudCache.street = street; document.body.classList.toggle('streetcam', street); }   // from below, the lamps' cones of light would fill the screen
+  // Name tags show only near the car, or the whole town's would pile up across the view: loot and hand-off tags
+  // from a couple of streets away, hideout and landmark names only when you are right beside them.
+  const playing = (S.screen === 'play' || S.screen === 'over') && S.me, cx = playing ? S.me.v.x : S.cam.tgt.x, cz = playing ? S.me.v.y : S.cam.tgt.z;
   for (const sp of LABELS) {
     if (!sp.visible) continue;
     sp.getWorldPosition(v3); const d = v3.distanceTo(camera.position), s = sp.userData.base * clamp(d / 9.5, 0.55, 2.2);
-    // from street level only the name tags of places nearby show, or the whole town's would pile up along the horizon
-    const reach = street ? (sp.userData.far ? 30 : 13) : 1e9;
-    sp.scale.set(s * sp.userData.ratio, s, 1); sp.material.opacity = clamp((d - 2.6) / 2.5, 0, 1) * clamp((reach - d) / 4, 0, 1) * (S.cam.hide > 0.5 ? 0 : 1);
+    const reach = sp.userData.far ? 26 : 6.5, away = Math.hypot(v3.x - cx, v3.z - cz);
+    sp.scale.set(s * sp.userData.ratio, s, 1); sp.material.opacity = clamp((d - 2.6) / 2.5, 0, 1) * clamp((reach - away) / 3, 0, 1) * (S.cam.hide > 0.5 ? 0 : 1);
     sp.material.visible = sp.material.opacity > 0.01;   // a name tag that has faded out is not drawn
   }
 }
@@ -970,7 +975,8 @@ function updateWorldVisuals(time) {
   }
   for (let i = 0; i < W.escapes.length; i++) H.escVis[i].beam.material.opacity = 0.2 * clamp((Math.hypot(camera.position.x - W.escapes[i].x, camera.position.z - W.escapes[i].y) - 3.5) / 5, 0.12, 1);
   const locked = S.t < S.leverLock;
-  for (const l of H.leverVis) l.bulb.material.color.setHex(locked ? 0xff4a4a : COLORS.police);
+  const jailedNow = chors().some(q => q.jailed);   // the lever's name tag only matters while somebody is in the impound
+  for (const l of H.leverVis) { l.bulb.material.color.setHex(locked ? 0xff4a4a : COLORS.police); l.label.visible = jailedNow; }
   H.thanaLamp.material.color.setHex(Math.floor(time * 2) % 2 ? 0x8fb4ff : 0xff6a6a);
   // arrow on the road ahead pointing to the next useful place
   const me = S.me; let tgt = null, col = COLORS.loot;
@@ -1017,7 +1023,8 @@ function updateHud(dt, time) {
   } else { setText('bag', 'Busts: ' + me.arrests); setText('status', ''); }
   setText('speedNum', String(Math.round(Math.abs(v.vf) * CFG.KMH)));
   setBar('nitroFill', me.nitro); $('nitroFill').style.background = me.nitro < CFG.NITRO.MIN ? '#ff6a6a' : '';
-  setText('lamp', me.role === 'chor' ? (me.lights ? 'LIGHTS ON' : 'LIGHTS OFF · creep to stay unseen') : (me.lights ? 'SIREN ON' : 'SIREN OFF'));
+  setText('lamp', me.lights ? '' : me.role === 'chor' ? 'LIGHTS OFF' : 'SIREN OFF');
+  const helpOn = S.t < 12; if (hudCache.help !== helpOn) { hudCache.help = helpOn; $('help').style.opacity = helpOn ? 1 : 0; }
   $('lamp').classList.toggle('off', !me.lights);
   const ctx = S.ctx, pr = $('prompt');
   if (ctx && S.screen === 'play') {
