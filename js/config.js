@@ -43,7 +43,7 @@ export const CFG = {
   TIP_EVERY: 12, TIP_EVERY_JACKPOT: 8,   // carrying loot through lit streets gets you reported this often
   HEAT_MAX: 5,
 
-  MAX_PLAYERS: 8, PROTO: 4,
+  MAX_PLAYERS: 8, PROTO: 5,
 };
 
 // ------------------------------------------------------------------ a round can bend the numbers

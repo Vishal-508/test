@@ -1,10 +1,10 @@
 // Builds the town you drive through: wet painted ground that reacts to headlights, instanced buildings
 // with lit windows, landmarks, street lamps with light cones, loot markers, hideouts and labels.
 import * as THREE from '../vendor/three.module.min.js';
-import { N, CS, T, LANE, hash2 } from './world.js?v=7';
-import { buildHideout, kindFor } from './hideouts.js?v=7';
-import { CFG } from './config.js?v=7';
-import { canDrawKana, mergeBoxes } from './ambient.js?v=7';
+import { N, CS, T, LANE, hash2 } from './world.js?v=8';
+import { buildHideout, kindFor } from './hideouts.js?v=8';
+import { CFG } from './config.js?v=8';
+import { canDrawKana, mergeBoxes } from './ambient.js?v=8';
 
 const FONT = '"Baloo 2","Trebuchet MS","Segoe UI",sans-serif';
 

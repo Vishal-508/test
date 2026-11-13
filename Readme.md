@@ -49,7 +49,9 @@ sometimes rain. Loot you bank raises your rank and unlocks new paint for the get
 3. Everyone picks a side, chor or police. The host presses **Start round**.
 
 Computer jeeps fill in when there are few police players. The player who created the room should
-keep the game tab open and in front, because their browser runs the round for everyone.
+keep the game tab open and in front, because their browser runs the round for everyone. (On a phone
+the game keeps the screen awake while you are in a room; if the screen is locked anyway, nobody can
+join until the game is back on screen.)
 
 The host sets up the room, and everyone sees the choices:
 
@@ -77,10 +79,20 @@ work, because browsers block module scripts on `file://`.
 ## How multiplayer works without a server
 
 GitHub Pages only serves files, so there is no game server. Friends connect browser to browser
-(WebRTC data channels, through the [PeerJS](https://peerjs.com) library). The only outside service is the
-free public PeerJS broker, which introduces the browsers to each other when a room is created or joined.
-On some mobile networks and office firewalls a direct connection cannot be made; if joining fails, try
-another network or Wi-Fi.
+(WebRTC data channels, through the [PeerJS](https://peerjs.com) library). The free public PeerJS broker
+introduces the browsers to each other when a room is created or joined.
+
+Two devices cannot always open a direct link, and the most common case is two devices on the same home
+Wi-Fi (the router will not pass traffic between them). So joining has a **backup route**: if the direct
+link has not opened after five seconds, the same game messages travel through a free public message relay
+instead (MQTT over a secure WebSocket; three public test brokers are tried at once and the first to reach
+the host is used). It is a little slower, so it is only used when needed, and a player who came in that
+way is tagged "backup route" in the room. If the PeerJS broker itself cannot be reached, the room still
+works on the backup route alone. These relays are public test services with no sign-up and no promise of
+uptime; the game moves to another one if the one in use goes quiet.
+
+For testing, add `&link=relay` to the address on the joining device to skip the direct link, or
+`&link=direct` to never use the backup route.
 
 ## What is in this folder
 
@@ -97,6 +109,7 @@ another network or Wi-Fi.
 | `js/fx.js`, `js/postfx.js` | smoke, sparks, skid marks, rain; bloom and colour grade |
 | `js/audio.js` | engine, sirens, music and effects, all synthesised (no sound files) |
 | `js/net.js` | room codes and browser-to-browser connections |
+| `js/relay.js` | the backup route for devices that cannot link directly: a small MQTT client and the hand-over rules on top of it |
 | `data/map.json` | the town of Jugnupur: roads, places to rob, hiding spots, hand-off points |
 | `data/map-hotaru.json` | a second town, Hotaru-cho (Japan). Pick it with the **Town** button on the menu or in a room |
 | `vendor/` | [three.js](https://threejs.org) r160 (with its post-processing add-ons) and [PeerJS](https://peerjs.com) 1.5.4, both MIT licensed |

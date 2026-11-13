@@ -1,16 +1,16 @@
 // Chor Police: Jugnupur ki Raat. A night car chase: game rules, police AI, multiplayer sync, input, camera, HUD and the main loop.
 import * as THREE from '../vendor/three.module.min.js';
-import { CFG, matchSetup, rankFor, paintsUnlocked, applyRules, TOWNS, townName, LEVEL_NAMES, roomSetup, NIGHT_KINDS, composeRound, pickNight, pickTwist } from './config.js?v=7';
-import { buildWorld, hash2, LANE, N as GRID, CS } from './world.js?v=7';
-import { buildScene, paintMini, setSiteVisual, COLORS, LABELS, makeLabel } from './scene.js?v=7';
-import { makeVehicle, stepVehicle, makeDriver, drive, CAR } from './vehicle.js?v=7';
-import { makeCar, PAINTS } from './cars.js?v=7';
-import { Fx } from './fx.js?v=7';
-import { buildDressing } from './dressing.js?v=7';
-import { buildAmbient } from './ambient.js?v=7';
-import { makePost } from './postfx.js?v=7';
-import { initAudio, setMuted, isMuted, setMusicOn, isMusicOn, engine, skid, siren, heartbeat, rain, music, sfx } from './audio.js?v=7';
-import { HostNet, ClientNet, cleanCode } from './net.js?v=7';
+import { CFG, matchSetup, rankFor, paintsUnlocked, applyRules, TOWNS, townName, LEVEL_NAMES, roomSetup, NIGHT_KINDS, composeRound, pickNight, pickTwist } from './config.js?v=8';
+import { buildWorld, hash2, LANE, N as GRID, CS } from './world.js?v=8';
+import { buildScene, paintMini, setSiteVisual, COLORS, LABELS, makeLabel } from './scene.js?v=8';
+import { makeVehicle, stepVehicle, makeDriver, drive, CAR } from './vehicle.js?v=8';
+import { makeCar, PAINTS } from './cars.js?v=8';
+import { Fx } from './fx.js?v=8';
+import { buildDressing } from './dressing.js?v=8';
+import { buildAmbient } from './ambient.js?v=8';
+import { makePost } from './postfx.js?v=8';
+import { initAudio, setMuted, isMuted, setMusicOn, isMusicOn, engine, skid, siren, heartbeat, rain, music, sfx } from './audio.js?v=8';
+import { HostNet, ClientNet, cleanCode } from './net.js?v=8';
 
 const $ = id => document.getElementById(id);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -1189,7 +1189,18 @@ function applyQuality() {
   pixelCap = isTouch ? (high ? 1.75 : 1.25) : (high ? 2 : 1.25);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, pixelCap)); resize();
 }
-function leaveNet() { if (S.net) { try { if (S.isHost) S.net.broadcast({ k: 'bye' }); else S.net.send({ k: 'bye' }); } catch (e) {} const n = S.net; S.net = null; setTimeout(() => { try { n.close(); } catch (e) {} }, 150); } }
+// Keep the screen on while in a room. A phone that locks its screen freezes the game: nobody can join that room, and
+// the others see that player drop. (Where the browser does not allow it, the game simply carries on without.)
+let wakeLock = null, waking = false;
+async function keepAwake() {
+  if (wakeLock || waking || !S.net || S.solo || !navigator.wakeLock || document.visibilityState !== 'visible') return;
+  waking = true;
+  try { const w = await navigator.wakeLock.request('screen'); if (S.net && !S.solo) { wakeLock = w; w.addEventListener('release', () => { if (wakeLock === w) wakeLock = null; }); } else w.release(); } catch (e) { /* not allowed just now */ }
+  waking = false;
+}
+function letSleep() { const w = wakeLock; wakeLock = null; if (w) { try { w.release(); } catch (e) {} } }
+document.addEventListener('visibilitychange', keepAwake);   // the lock is dropped whenever the page is hidden: take it again on return
+function leaveNet() { letSleep(); if (S.net) { try { if (S.isHost) S.net.broadcast({ k: 'bye' }); else S.net.send({ k: 'bye' }); } catch (e) {} const n = S.net; S.net = null; setTimeout(() => { try { n.close(); } catch (e) {} }, 150); } }
 function toMenu(msg) { leaveNet(); S.isHost = true; S.solo = true; S.myId = 'h'; nightLook(null); document.body.classList.remove('hiding'); hudCache.hiding = false; clearDyn(); arrow.visible = false; fx.setRain(0); S.openDoors = []; S.searchLv = {}; setScreen('menu'); refreshMenu(); $('menuErr').textContent = msg || ''; }
 function spawnFor(role, k) {
   if (role === 'police') { const p = W.policeSpawns[k % W.policeSpawns.length]; return { x: p.x, y: p.y, a: p.a }; }
@@ -1215,7 +1226,7 @@ function renderLobby() {
   const L = S.lobby, me = L.players.find(p => p.id === S.myId), O = L.opts, host = S.isHost;
   $('roomCode').textContent = L.code; $('pcount').textContent = L.players.length;
   const ul = $('plist'); ul.innerHTML = '';
-  for (const p of L.players) { const li = document.createElement('li'); const sw = document.createElement('span'); sw.style.cssText = 'width:14px;height:14px;border-radius:50%;flex:none;border:1px solid rgba(255,255,255,.3);background:#' + ((p.role === 'chor' ? (p.paint | 0) : 0xdfe6f2).toString(16).padStart(6, '0')); const nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = p.name + (p.id === S.myId ? ' (you)' : '') + (p.id === 'h' ? ' · host' : ''); const tg = document.createElement('span'); tg.className = 'tag ' + p.role; tg.textContent = p.role === 'chor' ? 'Chor' : 'Police'; li.append(sw, nm, tg); ul.appendChild(li); }
+  for (const p of L.players) { const li = document.createElement('li'); const sw = document.createElement('span'); sw.style.cssText = 'width:14px;height:14px;border-radius:50%;flex:none;border:1px solid rgba(255,255,255,.3);background:#' + ((p.role === 'chor' ? (p.paint | 0) : 0xdfe6f2).toString(16).padStart(6, '0')); const nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = p.name + (p.id === S.myId ? ' (you)' : '') + (p.id === 'h' ? ' · host' : ''); const tg = document.createElement('span'); tg.className = 'tag ' + p.role; tg.textContent = p.role === 'chor' ? 'Chor' : 'Police'; li.append(sw, nm); if (p.link === 'relay') { const rl = document.createElement('span'); rl.className = 'tag relay'; rl.textContent = 'backup route'; rl.title = 'The direct link did not open, so this player is connected through a public relay. It works, but is a little slower.'; li.append(rl); } li.append(tg); ul.appendChild(li); }
   const nc = L.players.filter(p => p.role === 'chor').length, np = L.players.length - nc, setup = roomSetup(Math.max(1, nc), np, O.level);
   $('btnRoleChor').disabled = !!me && me.role === 'chor'; $('btnRolePolice').disabled = !!me && me.role === 'police';
   // tonight's settings: everyone sees them, only the host can change them
@@ -1225,7 +1236,7 @@ function renderLobby() {
   $('optAuto').textContent = 'Auto level-up: ' + (O.autoLevel ? 'on' : 'off');
   for (const id of ['optTown', 'optSurprise', 'optAuto', 'btnShuffle']) $(id).disabled = !host;
   $('optLevelDown').disabled = !host || O.level <= 1; $('optLevelUp').disabled = !host || O.level >= 10;
-  $('btnShuffle').hidden = !host; $('hostNote').hidden = host;
+  $('btnShuffle').hidden = !host; $('hostNote').hidden = host; $('roomTip').hidden = !host;
   $('lobbyInfo').textContent = nc === 0 ? 'At least one player must be a chor.' : `${nc} getaway car${nc > 1 ? 's' : ''} against ${np} police player${np === 1 ? '' : 's'}${setup.cops ? ' and ' + setup.cops + ' computer jeep' + (setup.cops > 1 ? 's' : '') : ''}. Chors must bank about ${money(setup.target)}.` + (O.surprises ? ' Each round brings a different night, a twist and new start points.' : '');
   const Q = L.series; $('seriesLine').textContent = Q.rounds ? `Rounds played: ${Q.rounds} · Chors ${Q.chor} – ${Q.police} Police` : '';
   $('btnStart').hidden = !host; $('btnStart').disabled = nc === 0;
@@ -1271,7 +1282,7 @@ async function createRoom() {
         if (m.v !== CFG.PROTO) { net.send(pid, { k: 'old' }); setTimeout(() => net.kick(pid), 400); return; }
         if (S.screen !== 'lobby') { net.send(pid, { k: 'busy' }); setTimeout(() => net.kick(pid), 400); return; }
         if (S.lobby.players.length >= CFG.MAX_PLAYERS) { net.send(pid, { k: 'full' }); setTimeout(() => net.kick(pid), 400); return; }
-        if (!S.lobby.players.some(p => p.id === pid)) S.lobby.players.push({ id: pid, name: String(m.name || 'Dost').replace(/[<>]/g, '').trim().slice(0, 14) || 'Dost', role: 'chor', paint: (m.paint | 0) & 0xffffff });
+        if (!S.lobby.players.some(p => p.id === pid)) S.lobby.players.push({ id: pid, name: String(m.name || 'Dost').replace(/[<>]/g, '').trim().slice(0, 14) || 'Dost', role: 'chor', paint: (m.paint | 0) & 0xffffff, link: net.linkOf(pid) });
         broadcastLobby();
       } else if (m.k === 'role') { const p = S.lobby.players.find(q => q.id === pid); if (p && S.screen === 'lobby' && (m.role === 'chor' || m.role === 'police')) { p.role = m.role; broadcastLobby(); } }
       else if (m.k === 'p') {
@@ -1288,7 +1299,7 @@ async function createRoom() {
     if (S.screen !== 'menu' || S.net) { net.close(); $('btnCreate').disabled = false; return; }   // gave up waiting and started something else
     S.net = net; S.isHost = true; S.solo = false; S.myId = 'h';
     S.lobby = { code, players: [{ id: 'h', name: save.name, role: 'chor', paint: paintHex(save.paint) }], opts: cleanOpts({ level: 3, town: MAP_ID }), series: cleanSeries(null), lastTwist: '' };
-    $('menuErr').textContent = ''; setScreen('lobby'); renderLobby();
+    $('menuErr').textContent = ''; setScreen('lobby'); renderLobby(); keepAwake();
   } catch (e) { $('menuErr').textContent = e.message; net.close(); }
   $('btnCreate').disabled = false;
 }
@@ -1312,6 +1323,7 @@ async function joinRoom() {
       }
       else if (m.k === 'start') { const go = m; ensureTown(String(go.map || '')).then(() => { if (S.net === net) beginMatch(go); }); }
       else if (m.k === 's') applySnapshot(m);
+      else if (m.k === 'ev') { if (S.screen === 'play' && Array.isArray(m.e)) for (const e of m.e) handleEvent(e); }   // the backup route sends happenings apart from the picture
       else if (m.k === 'tp') { const me = S.me; if (me) { const v = me.v; v.x = m.x; v.y = m.y; v.a = +m.a || 0; v.vx = v.vy = v.vf = 0; me.tpSeq = m.q; me.scr = null; me.jailed = true; me.hidden = me.hiding = me.wasHidden = -1; S.cam.yaw = Math.PI - v.a; } }
       else if (m.k === 'note') feed(m.m);
       else if (m.k === 'busy') toMenu('That room is in the middle of a round. Try again in a few minutes.');
@@ -1321,11 +1333,12 @@ async function joinRoom() {
     onClose() { if (S.net === net) toMenu('Lost the connection to the host.'); },
   });
   try {
-    await net.connect(code);
+    const link = await net.connect(code, text => { if (S.screen === 'menu' && !S.net) $('menuErr').textContent = text; }, save.link === 'relay');
+    if (save.link !== link) { save.link = link; storeSave(); }   // a device that needed the backup route goes to it sooner next time
     if (S.screen !== 'menu' || S.net) { net.close(); $('btnJoin').disabled = false; return; }
     S.net = net; S.isHost = false; S.solo = false; S.hostHeard = performance.now();
     net.send({ k: 'hello', name: save.name, paint: paintHex(save.paint), v: CFG.PROTO });
-    $('menuErr').textContent = 'Connected. Waiting for the room…';
+    $('menuErr').textContent = 'Connected. Waiting for the room…'; keepAwake();
   } catch (e) { $('menuErr').textContent = e.message; }
   $('btnJoin').disabled = false;
 }
